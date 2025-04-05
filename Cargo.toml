@@ -1,0 +1,12 @@
+[package]
+name = "gvrtex"
+version = "0.1.0"
+authors = ["Sten-Kristjan Prantsu <xortile@gmail.com>"]
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.9.0"
+byteorder = "1.5.0"
+image = "0.25.6"
+imagequant = "4.3.4"
