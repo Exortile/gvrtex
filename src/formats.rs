@@ -44,6 +44,26 @@ impl From<DataFormat> for u8 {
     }
 }
 
+impl TryFrom<u8> for DataFormat {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Self::Intensity4),
+            0x01 => Ok(Self::Intensity8),
+            0x02 => Ok(Self::IntensityA4),
+            0x03 => Ok(Self::IntensityA8),
+            0x04 => Ok(Self::Rgb565),
+            0x05 => Ok(Self::Rgb5a3),
+            0x06 => Ok(Self::Argb8888),
+            0x08 => Ok(Self::Index4),
+            0x09 => Ok(Self::Index8),
+            0x0E => Ok(Self::Dxt1),
+            _ => Err("Invalid value for DataFormat enum"),
+        }
+    }
+}
+
 bitflags! {
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct DataFlags: u8 {
