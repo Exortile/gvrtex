@@ -10,7 +10,41 @@ pub mod formats;
 mod iter;
 mod pixel_codecs;
 
-#[allow(dead_code)]
+#[derive(Debug)]
+pub enum TextureEncodeError {
+    EncodeError(ImageError),
+    PaletteError(imagequant::Error),
+}
+
+impl Error for TextureEncodeError {}
+
+impl fmt::Display for TextureEncodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EncodeError(err) => write!(f, "{err}"),
+            Self::PaletteError(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl From<ImageError> for TextureEncodeError {
+    fn from(value: ImageError) -> Self {
+        Self::EncodeError(value)
+    }
+}
+
+impl From<imagequant::Error> for TextureEncodeError {
+    fn from(value: imagequant::Error) -> Self {
+        Self::PaletteError(value)
+    }
+}
+
+impl From<std::io::Error> for TextureEncodeError {
+    fn from(value: std::io::Error) -> Self {
+        Self::EncodeError(ImageError::IoError(value))
+    }
+}
+
 #[derive(Default)]
 pub struct TextureEncoder {
     texture_type: TextureType,
@@ -25,7 +59,7 @@ impl TextureEncoder {
             texture_type: TextureType::GCIX,
             pixel_format,
             data_format,
-            ..Default::default()
+            data_flags: DataFlags::InternalPalette,
         }
     }
 
@@ -37,7 +71,24 @@ impl TextureEncoder {
         }
     }
 
-    pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, ImageError> {
+    pub fn new_gbix_palettized(pixel_format: PixelFormat, data_format: DataFormat) -> Self {
+        Self {
+            texture_type: TextureType::GBIX,
+            pixel_format,
+            data_format,
+            data_flags: DataFlags::InternalPalette,
+        }
+    }
+
+    pub fn new_gbix(data_format: DataFormat) -> Self {
+        Self {
+            texture_type: TextureType::GBIX,
+            data_format,
+            ..Default::default()
+        }
+    }
+
+    pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, TextureEncodeError> {
         let mut result = Vec::new();
         let img = ImageReader::open(img_path)?.decode()?;
         let rgba_img = img.into_rgba8();
@@ -50,6 +101,8 @@ impl TextureEncoder {
             DataFormat::IntensityA8 => encode_pixels_intensity_alpha8(&rgba_img),
             DataFormat::Intensity4 => encode_pixels_intensity_4(&rgba_img),
             DataFormat::Intensity8 => encode_pixels_intensity_8(&rgba_img),
+            DataFormat::Index8 => encode_pixels_with_palette_index8(&rgba_img, self.pixel_format)?,
+            DataFormat::Index4 => encode_pixels_with_palette_index4(&rgba_img, self.pixel_format)?,
             _ => unimplemented!(),
         };
 
@@ -65,7 +118,11 @@ impl TextureEncoder {
         encoded: &[u8],
         buf: &mut Vec<u8>,
     ) -> std::io::Result<()> {
-        buf.write_all(b"GCIX")?;
+        if self.texture_type == TextureType::GCIX {
+            buf.write_all(b"GCIX")?;
+        } else {
+            buf.write_all(b"GBIX")?;
+        }
         buf.write_u32::<LittleEndian>(8)?;
         buf.resize(0x10, 0); // padding
 
@@ -73,7 +130,11 @@ impl TextureEncoder {
         buf.write_u32::<LittleEndian>((encoded.len() + 8).try_into().unwrap())?;
         buf.write_u16::<LittleEndian>(0)?; // padding
 
-        buf.write_u8(0)?;
+        let pixel_format = (self.pixel_format as u8) << 4;
+        let data_flags: u8 = self.data_flags.into();
+        let flags = pixel_format | data_flags;
+
+        buf.write_u8(flags)?;
         buf.write_u8(self.data_format.into())?;
         buf.write_u16::<BigEndian>(image.width().try_into().unwrap())?;
         buf.write_u16::<BigEndian>(image.height().try_into().unwrap())?;
@@ -83,15 +144,15 @@ impl TextureEncoder {
 }
 
 #[derive(Debug)]
-pub enum TextureError {
+pub enum TextureDecodeError {
     InvalidFile,
     ParseError(&'static str),
     IoError(std::io::Error),
 }
 
-impl Error for TextureError {}
+impl Error for TextureDecodeError {}
 
-impl fmt::Display for TextureError {
+impl fmt::Display for TextureDecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFile => write!(f, "The given file is an invalid GVR texture file."),
@@ -101,15 +162,15 @@ impl fmt::Display for TextureError {
     }
 }
 
-impl From<std::io::Error> for TextureError {
+impl From<std::io::Error> for TextureDecodeError {
     fn from(value: std::io::Error) -> Self {
-        TextureError::IoError(value)
+        TextureDecodeError::IoError(value)
     }
 }
 
-impl From<&'static str> for TextureError {
+impl From<&'static str> for TextureDecodeError {
     fn from(value: &'static str) -> Self {
-        TextureError::ParseError(value)
+        TextureDecodeError::ParseError(value)
     }
 }
 
@@ -127,7 +188,7 @@ impl TextureDecoder {
         })
     }
 
-    pub fn decode(&mut self) -> Result<(), TextureError> {
+    pub fn decode(&mut self) -> Result<(), TextureDecodeError> {
         self.is_valid_gvr()?;
 
         self.cursor.seek(SeekFrom::Start(0x14))?;
@@ -143,7 +204,7 @@ impl TextureDecoder {
         let mut data: Vec<u8> = Vec::with_capacity(data_len);
         let read_size = self.cursor.read_to_end(&mut data)?;
         if read_size != data_len {
-            return Err(TextureError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile);
         }
 
         self.image = match data_format {
@@ -167,16 +228,16 @@ impl TextureDecoder {
         Ok(result)
     }
 
-    fn is_valid_gvr(&mut self) -> Result<(), TextureError> {
+    fn is_valid_gvr(&mut self) -> Result<(), TextureDecodeError> {
         let type_magic = self.read_string(4)?;
         if type_magic != "GCIX" && type_magic != "GBIX" {
-            return Err(TextureError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile);
         }
 
         self.cursor.seek(SeekFrom::Start(0x10))?;
         let tex_magic = self.read_string(4)?;
         if tex_magic != "GVRT" {
-            return Err(TextureError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile);
         }
         Ok(())
     }

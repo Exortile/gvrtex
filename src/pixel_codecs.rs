@@ -1,8 +1,129 @@
 use std::io::Cursor;
 
-use crate::iter::{PixelBlockIterator, PixelBlockIteratorExt};
+use crate::{
+    formats::PixelFormat,
+    iter::{PixelBlockIterator, PixelBlockIteratorExt},
+};
 use byteorder::{BigEndian, ReadBytesExt};
-use image::RgbaImage;
+use image::{Pixel, Rgba, RgbaImage};
+
+/// Returns a copy of the given RGBA `image` as a vector of pixels that's suitable
+/// for in use with [`imagequant`].
+fn as_imagequant_vec(
+    image: &RgbaImage,
+    palette_pixel_format: PixelFormat,
+) -> Vec<imagequant::RGBA> {
+    image
+        .as_raw()
+        .chunks(4)
+        .map(|pixel| {
+            if palette_pixel_format == PixelFormat::RGB565 {
+                imagequant::RGBA::new(pixel[0], pixel[1], pixel[2], 0xFF)
+            } else {
+                imagequant::RGBA::new(pixel[0], pixel[1], pixel[2], pixel[3])
+            }
+        })
+        .collect()
+}
+
+/// Uses [`imagequant`] to turn the given `image` into a color palette with each pixel mapped to an
+/// index into the palette.
+///
+/// `max_colors` determines how many colors the palette should consist of. If there isn't enough
+/// colors in the provided image (less than `max_colors`), the resulting palette gets padded with
+/// transparent values instead.
+fn palettize_image(
+    image: &RgbaImage,
+    max_colors: u32,
+    palette_pixel_format: PixelFormat,
+) -> Result<(Vec<imagequant::RGBA>, Vec<u8>), imagequant::Error> {
+    let mut attr = imagequant::new();
+    attr.set_max_colors(max_colors)?;
+    let mut imagequant_img = attr.new_image(
+        as_imagequant_vec(image, palette_pixel_format),
+        image.width() as usize,
+        image.height() as usize,
+        0.,
+    )?;
+
+    let mut quantized = attr.quantize(&mut imagequant_img)?;
+    let (mut palette, indices) = quantized.remapped(&mut imagequant_img)?;
+
+    if palette.len() != max_colors as usize {
+        log::warn!(
+            "Constructed palette only has {} colors (needs {max_colors}). Padding with transparent color.",
+            palette.len()
+        );
+
+        palette.resize(max_colors as usize, imagequant::RGBA::new(0, 0, 0, 0));
+    }
+
+    Ok((palette, indices))
+}
+
+/// Encodes the given `palette` into the suitable [`PixelFormat`], returning a [`Vec`] of bytes.
+fn encode_palette(palette: Vec<imagequant::RGBA>, palette_pixel_format: PixelFormat) -> Vec<u8> {
+    let mut result: Vec<u8> = Vec::new();
+
+    for color in palette {
+        match palette_pixel_format {
+            PixelFormat::RGB5A3 => {
+                let color_slice = [color.r, color.g, color.b, color.a];
+                let p = Rgba::from_slice(&color_slice);
+                let pixel = encode_pixel_rgb5a3(p);
+                result.push(((pixel >> 8) & 0xFF).try_into().unwrap());
+                result.push((pixel & 0xFF).try_into().unwrap());
+            }
+            PixelFormat::RGB565 => {
+                let color_slice = [color.r, color.g, color.b, color.a];
+                let p = Rgba::from_slice(&color_slice);
+                let pixel = encode_pixel_rgb565(p);
+                result.push(((pixel >> 8) & 0xFF).try_into().unwrap());
+                result.push((pixel & 0xFF).try_into().unwrap());
+            }
+            PixelFormat::IntensityA8 => {
+                let color_slice = [color.r, color.g, color.b, color.a];
+                let p = Rgba::from_slice(&color_slice);
+                let (pixel, alpha) = encode_pixel_intensity_alpha8(p);
+                result.push(alpha);
+                result.push(pixel);
+            }
+        }
+    }
+
+    result
+}
+
+fn encode_pixel_rgb5a3(p: &Rgba<u8>) -> u16 {
+    let mut pixel: u16 = 0;
+    if p.0[3] <= 0xDA {
+        // Argb3444
+        pixel |= ((p.0[0] >> 4) as u16) << 8;
+        pixel |= ((p.0[1] >> 4) as u16) << 4;
+        pixel |= (p.0[2] >> 4) as u16;
+        pixel |= ((p.0[3] >> 5) as u16) << 12;
+    } else {
+        // Rgb555
+        pixel |= ((p.0[0] >> 3) as u16) << 10;
+        pixel |= ((p.0[1] >> 3) as u16) << 5;
+        pixel |= (p.0[2] >> 3) as u16;
+        pixel |= 0x8000;
+    }
+    pixel
+}
+
+fn encode_pixel_rgb565(p: &Rgba<u8>) -> u16 {
+    let mut pixel: u16 = 0x0000;
+    pixel |= ((p.0[0] >> 3) as u16) << 11;
+    pixel |= ((p.0[1] >> 2) as u16) << 5;
+    pixel |= (p.0[2] >> 3) as u16;
+    pixel
+}
+
+fn encode_pixel_intensity_alpha8(p: &Rgba<u8>) -> (u8, u8) {
+    let pixel = (0.30 * p.0[0] as f32 + 0.59 * p.0[1] as f32 + 0.11 * p.0[2] as f32) as u8;
+    (pixel, p.0[3])
+}
 
 pub fn encode_pixels_rgb5a3(image: &RgbaImage) -> Vec<u8> {
     let width = image.width();
@@ -12,21 +133,7 @@ pub fn encode_pixels_rgb5a3(image: &RgbaImage) -> Vec<u8> {
 
     for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
         let p = image.get_pixel(x, y);
-
-        let mut pixel: u16 = 0;
-        if p.0[3] <= 0xDA {
-            // Argb3444
-            pixel |= ((p.0[0] >> 4) as u16) << 8;
-            pixel |= ((p.0[1] >> 4) as u16) << 4;
-            pixel |= (p.0[2] >> 4) as u16;
-            pixel |= ((p.0[3] >> 5) as u16) << 12;
-        } else {
-            // Rgb555
-            pixel |= ((p.0[0] >> 3) as u16) << 10;
-            pixel |= ((p.0[1] >> 3) as u16) << 5;
-            pixel |= (p.0[2] >> 3) as u16;
-            pixel |= 0x8000;
-        }
+        let pixel = encode_pixel_rgb5a3(p);
 
         dest.push(((pixel >> 8) & 0xFF).try_into().unwrap());
         dest.push((pixel & 0xFF).try_into().unwrap());
@@ -68,10 +175,7 @@ pub fn encode_pixels_rgb565(image: &RgbaImage) -> Vec<u8> {
     for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
         let p = image.get_pixel(x, y);
 
-        let mut pixel: u16 = 0x0000;
-        pixel |= ((p.0[0] >> 3) as u16) << 11;
-        pixel |= ((p.0[1] >> 2) as u16) << 5;
-        pixel |= (p.0[2] >> 3) as u16;
+        let pixel = encode_pixel_rgb565(p);
 
         dest.push(((pixel >> 8) & 0xFF).try_into().unwrap());
         dest.push((pixel & 0xFF).try_into().unwrap());
@@ -110,9 +214,9 @@ pub fn encode_pixels_intensity_alpha8(image: &RgbaImage) -> Vec<u8> {
     for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
         let p = image.get_pixel(x, y);
 
-        let pixel = (0.30 * p.0[0] as f32 + 0.59 * p.0[1] as f32 + 0.11 * p.0[2] as f32) as u8;
+        let (pixel, alpha) = encode_pixel_intensity_alpha8(p);
 
-        dest.push(p.0[3]);
+        dest.push(alpha);
         dest.push(pixel);
     }
 
@@ -152,6 +256,46 @@ pub fn encode_pixels_intensity_8(image: &RgbaImage) -> Vec<u8> {
     }
 
     dest
+}
+
+pub fn encode_pixels_with_palette_index8(
+    image: &RgbaImage,
+    palette_pixel_format: PixelFormat,
+) -> Result<Vec<u8>, imagequant::Error> {
+    let width = image.width();
+    let height = image.height();
+
+    let (palette, indices) = palettize_image(image, 256, palette_pixel_format)?;
+    let mut result = encode_palette(palette, palette_pixel_format);
+
+    for (x, y) in PixelBlockIterator::new(width, height, 8, 4) {
+        let src_idx = y * width + x;
+        result.push(indices[src_idx as usize]);
+    }
+
+    Ok(result)
+}
+
+pub fn encode_pixels_with_palette_index4(
+    image: &RgbaImage,
+    palette_pixel_format: PixelFormat,
+) -> Result<Vec<u8>, imagequant::Error> {
+    let width = image.width();
+    let height = image.height();
+
+    let (palette, indices) = palettize_image(image, 16, palette_pixel_format)?;
+    let mut result = encode_palette(palette, palette_pixel_format);
+
+    // Resize vec to fill entire image data size (with palette)
+    let cur_len = result.len();
+    result.resize(cur_len + (width * height / 2) as usize, 0);
+
+    for (dest_idx, (_, col, x, y)) in PixelBlockIteratorExt::new(width, height, 8, 8).enumerate() {
+        let src_idx = y * width + x;
+        result[cur_len + dest_idx / 2] |= (indices[src_idx as usize] & 0xF) << ((!col & 0x1) * 4);
+    }
+
+    Ok(result)
 }
 
 pub fn decode_pixels_rgb5a3(

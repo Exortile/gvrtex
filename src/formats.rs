@@ -1,18 +1,18 @@
 use bitflags::bitflags;
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq)]
 pub enum TextureType {
     #[default]
     GCIX,
     GBIX,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PixelFormat {
+    #[default]
     IntensityA8,
     RGB565,
-    #[default]
     RGB5A3,
 }
 
@@ -72,5 +72,11 @@ bitflags! {
         const ExternalPalette = 0x2;
         const InternalPalette = 0x8;
         const Palette = Self::ExternalPalette.bits() | Self::InternalPalette.bits();
+    }
+}
+
+impl From<DataFlags> for u8 {
+    fn from(val: DataFlags) -> Self {
+        val.bits()
     }
 }
