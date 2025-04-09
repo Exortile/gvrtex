@@ -48,8 +48,9 @@ macro_rules! impl_pixelblockiterator {
     };
 }
 
-/// Iterates through an image of the given width and height in 4x4 blocks instead of singular
-/// pixels. The iterator returns the x and y coordinate as a tuple on each iteration.
+/// Iterates through an image of the given width and height in blocks with a given block size (4x4,
+/// 4x8, etc.) instead of pixels in a row. The iterator returns the x and y coordinate as a tuple
+/// on each iteration.
 ///
 /// It works by iterating through a block row by row, before moving on to the next block, which it
 /// also iterates through row by row until the end of the image.
