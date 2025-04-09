@@ -480,6 +480,34 @@ pub fn encode_pixels_with_palette_index4(
 // Decoding Functions //
 ////////////////////////
 
+fn decode_pixel_rgb5a3(pixel: u16) -> Rgba<u8> {
+    if (pixel & 0x8000) != 0 {
+        // Rgb555
+        let r = ((((pixel >> 10) & 0x1F) as f32) * 255. / 31.) as u8;
+        let g = ((((pixel >> 5) & 0x1F) as f32) * 255. / 31.) as u8;
+        let b = (((pixel & 0x1F) as f32) * 255. / 31.) as u8;
+        [r, g, b, 0xFF].into()
+    } else {
+        // Argb3444
+        let r = ((((pixel >> 8) & 0x0F) as f32) * 255. / 15.) as u8;
+        let g = ((((pixel >> 4) & 0x0F) as f32) * 255. / 15.) as u8;
+        let b = (((pixel & 0x0F) as f32) * 255. / 15.) as u8;
+        let a = ((((pixel >> 12) & 0x07) as f32) * 255. / 7.) as u8;
+        [r, g, b, a].into()
+    }
+}
+
+fn decode_pixel_rgb565(pixel: u16) -> Rgba<u8> {
+    let r = ((((pixel >> 11) & 0x1F) as f32) * 255. / 31.) as u8;
+    let g = ((((pixel >> 5) & 0x3F) as f32) * 255. / 63.) as u8;
+    let b = (((pixel & 0x1F) as f32) * 255. / 31.) as u8;
+    [r, g, b, 0xFF].into()
+}
+
+fn decode_pixel_intensity_alpha8(pixel: u8, alpha: u8) -> Rgba<u8> {
+    [pixel, pixel, pixel, alpha].into()
+}
+
 pub fn decode_pixels_rgb5a3(
     data: &[u8],
     width: u32,
@@ -490,21 +518,117 @@ pub fn decode_pixels_rgb5a3(
 
     for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
         let pixel = cursor.read_u16::<BigEndian>()?;
+        image.put_pixel(x, y, decode_pixel_rgb5a3(pixel));
+    }
 
-        if (pixel & 0x8000) != 0 {
-            // Rgb555
-            let r = ((((pixel >> 10) & 0x1F) as f32) * 255. / 31.) as u8;
-            let g = ((((pixel >> 5) & 0x1F) as f32) * 255. / 31.) as u8;
-            let b = (((pixel & 0x1F) as f32) * 255. / 31.) as u8;
-            image.put_pixel(x, y, [r, g, b, 0xFF].into());
-        } else {
-            // Argb3444
-            let r = ((((pixel >> 8) & 0x0F) as f32) * 255. / 15.) as u8;
-            let g = ((((pixel >> 4) & 0x0F) as f32) * 255. / 15.) as u8;
-            let b = (((pixel & 0x0F) as f32) * 255. / 15.) as u8;
-            let a = ((((pixel >> 12) & 0x07) as f32) * 255. / 7.) as u8;
-            image.put_pixel(x, y, [r, g, b, a].into());
-        }
+    Ok(image)
+}
+
+pub fn decode_pixels_rgb565(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
+        let pixel = cursor.read_u16::<BigEndian>()?;
+        image.put_pixel(x, y, decode_pixel_rgb565(pixel));
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_argb8888(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+
+    let mut src_idx = 0;
+
+    for (block, _, x, y) in PixelBlockIteratorExt::new(width, height, 4, 4) {
+        let cur_idx = (src_idx + block * 32) as usize;
+
+        let a = data[cur_idx];
+        let r = data[cur_idx + 1];
+        let g = data[cur_idx + 32];
+        let b = data[cur_idx + 33];
+
+        image.put_pixel(x, y, [r, g, b, a].into());
+
+        src_idx += 2;
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_intensity_alpha8(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    for (x, y) in PixelBlockIterator::new(width, height, 4, 4) {
+        let alpha = cursor.read_u8()?;
+        let pixel = cursor.read_u8()?;
+        image.put_pixel(x, y, decode_pixel_intensity_alpha8(pixel, alpha));
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_intensity_alpha4(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    for (x, y) in PixelBlockIterator::new(width, height, 8, 4) {
+        let pixel = cursor.read_u8()?;
+
+        let c = ((pixel & 0x0F) as f32 * 255. / 15.) as u8;
+        let a = (((pixel >> 4) & 0x0F) as f32 * 255. / 15.) as u8;
+
+        image.put_pixel(x, y, [c, c, c, a].into());
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_intensity_8(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    for (x, y) in PixelBlockIterator::new(width, height, 8, 4) {
+        let c = cursor.read_u8()?;
+        image.put_pixel(x, y, [c, c, c, 0xFF].into());
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_intensity_4(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+
+    for (idx, (_, col, x, y)) in PixelBlockIteratorExt::new(width, height, 8, 8).enumerate() {
+        let pixel = (data[idx / 2] >> ((!col & 0x1) * 4)) & 0x0F;
+        let c = (pixel as f32 * 255. / 15.) as u8;
+        image.put_pixel(x, y, [c, c, c, 0xFF].into());
     }
 
     Ok(image)

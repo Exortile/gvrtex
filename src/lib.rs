@@ -295,6 +295,30 @@ impl TextureDecoder {
 
         self.image = match data_format {
             DataFormat::Rgb5a3 => Some(decode_pixels_rgb5a3(&data, width.into(), height.into())?),
+            DataFormat::Rgb565 => Some(decode_pixels_rgb565(&data, width.into(), height.into())?),
+            DataFormat::Argb8888 => {
+                Some(decode_pixels_argb8888(&data, width.into(), height.into())?)
+            }
+            DataFormat::IntensityA8 => Some(decode_pixels_intensity_alpha8(
+                &data,
+                width.into(),
+                height.into(),
+            )?),
+            DataFormat::IntensityA4 => Some(decode_pixels_intensity_alpha4(
+                &data,
+                width.into(),
+                height.into(),
+            )?),
+            DataFormat::Intensity8 => Some(decode_pixels_intensity_8(
+                &data,
+                width.into(),
+                height.into(),
+            )?),
+            DataFormat::Intensity4 => Some(decode_pixels_intensity_4(
+                &data,
+                width.into(),
+                height.into(),
+            )?),
             _ => unimplemented!(),
         };
 
