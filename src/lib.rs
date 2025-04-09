@@ -146,8 +146,10 @@ impl TextureEncoder {
 #[derive(Debug)]
 pub enum TextureDecodeError {
     InvalidFile,
+    UndecodedError,
     ParseError(&'static str),
     IoError(std::io::Error),
+    ImageError(ImageError),
 }
 
 impl Error for TextureDecodeError {}
@@ -156,8 +158,10 @@ impl fmt::Display for TextureDecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFile => write!(f, "The given file is an invalid GVR texture file."),
+            Self::UndecodedError => write!(f, "This texture has not been decoded successfully."),
             Self::IoError(err) => write!(f, "{err}"),
             Self::ParseError(msg) => write!(f, "{msg}"),
+            Self::ImageError(err) => write!(f, "{err}"),
         }
     }
 }
@@ -174,13 +178,23 @@ impl From<&'static str> for TextureDecodeError {
     }
 }
 
+impl From<ImageError> for TextureDecodeError {
+    fn from(value: ImageError) -> Self {
+        TextureDecodeError::ImageError(value)
+    }
+}
+
 #[derive(Default)]
 pub struct TextureDecoder {
     cursor: Cursor<Vec<u8>>,
-    image: RgbaImage,
+    image: Option<RgbaImage>,
 }
 
 impl TextureDecoder {
+    /// Instantiate a new [`TextureDecoder`], that can decode the file in the given `gvr_path`,
+    /// reading the file's contents.
+    ///
+    /// This function doesn't decode the file by itself, [`Self::decode()`] must be called.
     pub fn new(gvr_path: &str) -> Result<Self, std::io::Error> {
         Ok(Self {
             cursor: Cursor::new(std::fs::read(gvr_path)?),
@@ -188,6 +202,10 @@ impl TextureDecoder {
         })
     }
 
+    /// Decodes the given image from [`Self::new()`].
+    ///
+    /// If something goes wrong while decoding, or the given file is not a valid GVR texture file,
+    /// a [`TextureDecodeError`] is returned.
     pub fn decode(&mut self) -> Result<(), TextureDecodeError> {
         self.is_valid_gvr()?;
 
@@ -208,15 +226,45 @@ impl TextureDecoder {
         }
 
         self.image = match data_format {
-            DataFormat::Rgb5a3 => decode_pixels_rgb5a3(&data, width.into(), height.into())?,
+            DataFormat::Rgb5a3 => Some(decode_pixels_rgb5a3(&data, width.into(), height.into())?),
             _ => unimplemented!(),
         };
 
         Ok(())
     }
 
-    pub fn save(&self, path: &str) -> ImageResult<()> {
-        self.image.save(path)
+    /// Checks if the decode process has concluded successfully.
+    pub fn is_decoded(&self) -> bool {
+        self.image.is_some()
+    }
+
+    /// Borrows the decoded image, if [`Self::decode()`] has ran successfully.
+    pub fn as_decoded(&self) -> &Option<RgbaImage> {
+        &self.image
+    }
+
+    /// Returns the decoded image, if [`Self::decode()`] has ran successfully, consuming `self`.
+    ///
+    /// If the image hasn't been decoded yet, a [`TextureDecodeError::UndecodedError`] is returned.
+    pub fn into_decoded(self) -> Result<RgbaImage, TextureDecodeError> {
+        if let Some(image) = self.image {
+            Ok(image)
+        } else {
+            Err(TextureDecodeError::UndecodedError)
+        }
+    }
+
+    /// Saves the currently decoded image into a file, with a format of your choice.
+    /// The format the file is saved in is derived from the file extension (.png, .jpg, etc.)
+    /// in the given `path`.
+    ///
+    /// If the image hasn't been decoded yet, a [`TextureDecodeError::UndecodedError`] is returned.
+    pub fn save(&self, path: &str) -> Result<(), TextureDecodeError> {
+        if self.image.is_none() {
+            return Err(TextureDecodeError::UndecodedError);
+        }
+        self.image.as_ref().unwrap().save(path)?;
+        Ok(())
     }
 
     fn read_string(&mut self, len: usize) -> Result<String, std::io::Error> {
