@@ -2,7 +2,7 @@ use std::io::Cursor;
 
 use crate::{
     formats::PixelFormat,
-    iter::{PixelBlockIterator, PixelBlockIteratorExt},
+    iter::{DxtBlockIterator, PixelBlockIterator, PixelBlockIteratorExt},
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use image::{Pixel, Rgba, RgbaImage};
@@ -94,6 +94,10 @@ fn encode_palette(palette: Vec<imagequant::RGBA>, palette_pixel_format: PixelFor
     result
 }
 
+////////////////////////
+// Encoding Functions //
+////////////////////////
+
 fn encode_pixel_rgb5a3(p: &Rgba<u8>) -> u16 {
     let mut pixel: u16 = 0;
     if p.0[3] <= 0xDA {
@@ -123,6 +127,180 @@ fn encode_pixel_rgb565(p: &Rgba<u8>) -> u16 {
 fn encode_pixel_intensity_alpha8(p: &Rgba<u8>) -> (u8, u8) {
     let pixel = (0.30 * p.0[0] as f32 + 0.59 * p.0[1] as f32 + 0.11 * p.0[2] as f32) as u8;
     (pixel, p.0[3])
+}
+
+fn compress_block_to_bc1(block: &[u8]) -> Vec<u8> {
+    let mut dist: Option<i32> = None;
+    let mut col_1 = 0;
+    let mut col_2 = 0;
+    let mut alpha = false;
+    let mut result = vec![0u8; 8];
+
+    for i in 0..15 {
+        if block[i * 4 + 3] < 16 {
+            alpha = true;
+        } else {
+            for j in (i + 1)..16 {
+                let temp = distance_bc1(block, i * 4, block, j * 4);
+
+                if temp > dist.unwrap_or(-1) {
+                    dist = Some(temp);
+                    col_1 = i;
+                    col_2 = j;
+                }
+            }
+        }
+    }
+
+    let mut palette: Vec<Vec<u8>> = Vec::with_capacity(4);
+
+    if dist.is_none() {
+        palette.push(vec![0, 0, 0, 0xff]);
+        palette.push(vec![0xff, 0xff, 0xff, 0xff]);
+    } else {
+        let color1_idx = col_1 * 4;
+        let color2_idx = col_2 * 4;
+
+        palette.push(vec![
+            block[color1_idx],
+            block[color1_idx + 1],
+            block[color1_idx + 2],
+            0xff,
+        ]);
+
+        palette.push(vec![
+            block[color2_idx],
+            block[color2_idx + 1],
+            block[color2_idx + 2],
+            0xff,
+        ]);
+
+        if palette[0][0] >> 3 == palette[1][0] >> 3
+            && palette[0][1] >> 2 == palette[1][1] >> 2
+            && palette[0][2] >> 3 == palette[1][2] >> 3
+        {
+            if palette[0][0] >> 3 == 0 && palette[0][1] >> 2 == 0 && palette[0][2] >> 3 == 0 {
+                palette[1][0] = 0xff;
+                palette[1][1] = 0xff;
+                palette[1][2] = 0xff;
+            } else {
+                palette[1][0] = 0x0;
+                palette[1][1] = 0x0;
+                palette[1][2] = 0x0;
+            }
+        }
+    }
+
+    palette.resize(4, vec![]);
+
+    result[0] = palette[0][2] & 0xf8 | palette[0][1] >> 5;
+    result[1] = palette[0][1] << 3 & 0xe0 | palette[0][0] >> 3;
+    result[2] = palette[1][2] & 0xf8 | palette[1][1] >> 5;
+    result[3] = palette[1][1] << 3 & 0xe0 | palette[1][0] >> 3;
+
+    if (result[0] > result[2] || (result[0] == result[2] && result[1] >= result[3])) == alpha {
+        result[4] = result[0];
+        result[5] = result[1];
+        result[0] = result[2];
+        result[1] = result[3];
+        result[2] = result[4];
+        result[3] = result[5];
+
+        palette[2] = palette[0].clone();
+        palette[0] = palette[1].clone();
+        palette[1] = palette[2].clone();
+    }
+
+    if !alpha {
+        palette[2] = vec![
+            ((((palette[0][0] as u32) << 1) + palette[1][0] as u32) / 3) as u8,
+            ((((palette[0][1] as u32) << 1) + palette[1][1] as u32) / 3) as u8,
+            ((((palette[0][2] as u32) << 1) + palette[1][2] as u32) / 3) as u8,
+            0xff,
+        ];
+
+        palette[3] = vec![
+            ((palette[0][0] as u32 + ((palette[1][0] as u32) << 1)) / 3) as u8,
+            ((palette[0][1] as u32 + ((palette[1][1] as u32) << 1)) / 3) as u8,
+            ((palette[0][2] as u32 + ((palette[1][2] as u32) << 1)) / 3) as u8,
+            0xff,
+        ];
+    } else {
+        palette[2] = vec![
+            ((palette[0][0] as u32 + palette[1][0] as u32) >> 1) as u8,
+            ((palette[0][1] as u32 + palette[1][1] as u32) >> 1) as u8,
+            ((palette[0][2] as u32 + palette[1][2] as u32) >> 1) as u8,
+            0xff,
+        ];
+
+        palette[3] = vec![0, 0, 0, 0];
+    }
+
+    for i in 0..(block.len() / 16) {
+        result[4 + i] = (least_distance_bc1(&palette, block, i * 16) << 6
+            | least_distance_bc1(&palette, block, i * 16 + 4) << 4
+            | least_distance_bc1(&palette, block, i * 16 + 8) << 2
+            | least_distance_bc1(&palette, block, i * 16 + 12)) as u8;
+    }
+
+    result
+}
+
+fn least_distance_bc1(palette: &[Vec<u8>], color: &[u8], offset: usize) -> usize {
+    if color[offset + 3] < 8 {
+        return 3;
+    }
+
+    let mut dist: i32 = i32::MAX;
+    let mut best = 0;
+
+    for (i, c) in palette.iter().enumerate() {
+        if c[3] != 0xff {
+            break;
+        }
+
+        let temp = distance_bc1(c, 0, color, offset);
+
+        if temp < dist {
+            if temp == 0 {
+                return i;
+            }
+
+            dist = temp;
+            best = i;
+        }
+    }
+
+    best
+}
+
+fn distance_bc1(color_1: &[u8], offset_1: usize, color_2: &[u8], offset_2: usize) -> i32 {
+    let mut temp: i32 = 0;
+
+    for i in 0..3 {
+        let val: i32 = color_1[offset_1 + i] as i32 - color_2[offset_2 + i] as i32;
+        temp += val * val;
+    }
+
+    temp
+}
+
+pub fn encode_pixels_dxt1(image: &RgbaImage) -> Vec<u8> {
+    let width = image.width();
+    let height = image.height();
+    let dest_size = (width * height / 2).try_into().unwrap();
+    let mut dest: Vec<u8> = Vec::with_capacity(dest_size);
+
+    for block in DxtBlockIterator::new(image) {
+        dest.append(&mut compress_block_to_bc1(&block));
+    }
+
+    // Pad the data if needed
+    if dest.len() < 32 {
+        dest.resize(32, 0);
+    }
+
+    dest
 }
 
 pub fn encode_pixels_rgb5a3(image: &RgbaImage) -> Vec<u8> {
@@ -297,6 +475,10 @@ pub fn encode_pixels_with_palette_index4(
 
     Ok(result)
 }
+
+////////////////////////
+// Decoding Functions //
+////////////////////////
 
 pub fn decode_pixels_rgb5a3(
     data: &[u8],

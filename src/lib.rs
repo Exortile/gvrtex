@@ -103,7 +103,7 @@ impl TextureEncoder {
             DataFormat::Intensity8 => encode_pixels_intensity_8(&rgba_img),
             DataFormat::Index8 => encode_pixels_with_palette_index8(&rgba_img, self.pixel_format)?,
             DataFormat::Index4 => encode_pixels_with_palette_index4(&rgba_img, self.pixel_format)?,
-            _ => unimplemented!(),
+            DataFormat::Dxt1 => encode_pixels_dxt1(&rgba_img),
         };
 
         self.write_header(&rgba_img, &encoded, &mut result)?;

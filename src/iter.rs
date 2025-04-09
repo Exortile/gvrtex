@@ -1,3 +1,5 @@
+use image::RgbaImage;
+
 /// Provides the internal implementation for a [`Iterator::next()`] function, catered to the pixel
 /// block iterators.
 ///
@@ -125,5 +127,78 @@ impl Iterator for PixelBlockIteratorExt {
                 self.blocks += 1;
             }
         )
+    }
+}
+
+pub struct DxtBlockIterator<'a> {
+    image: &'a RgbaImage,
+    width: u32,
+    height: u32,
+
+    x: u32,
+    y: u32,
+    x_block: u32,
+    y_block: u32,
+}
+
+impl<'a> DxtBlockIterator<'a> {
+    pub fn new(image: &'a RgbaImage) -> Self {
+        Self {
+            image,
+            width: image.width(),
+            height: image.height(),
+
+            x: 0,
+            y: 0,
+            x_block: 0,
+            y_block: 0,
+        }
+    }
+}
+
+impl Iterator for DxtBlockIterator<'_> {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.y >= self.height {
+            return None;
+        }
+
+        let mut block = Vec::with_capacity(64);
+
+        for y_sub_block in (0..4).take_while(|i| self.y + self.y_block + i < self.height) {
+            for x_sub_block in (0..4).take_while(|i| self.x + self.x_block + i < self.width) {
+                let x = self.x + self.x_block + x_sub_block;
+                let y = self.y + self.y_block + y_sub_block;
+                let p = self.image.get_pixel(x, y);
+
+                block.push(p.0[2]);
+                block.push(p.0[1]);
+                block.push(p.0[0]);
+                block.push(p.0[3]);
+            }
+        }
+
+        self.x_block += 4;
+        if self.x_block == 8 {
+            self.x_block = 0;
+            self.y_block += 4;
+        } else {
+            return Some(block);
+        }
+
+        if self.y_block == 8 {
+            self.y_block = 0;
+            self.x += 8;
+        } else {
+            return Some(block);
+        }
+
+        if self.x >= self.width {
+            self.x = 0;
+            self.y += 8;
+        }
+
+        Some(block)
     }
 }
