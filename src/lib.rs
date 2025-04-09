@@ -1,7 +1,8 @@
 use crate::formats::{DataFlags, DataFormat, PixelFormat, TextureType};
 use crate::pixel_codecs::*;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use image::{ImageError, ImageReader, ImageResult, RgbaImage};
+use image::imageops::FilterType;
+use image::{DynamicImage, ImageError, ImageReader, RgbaImage};
 use std::error::Error;
 use std::fmt;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
@@ -14,6 +15,7 @@ mod pixel_codecs;
 pub enum TextureEncodeError {
     EncodeError(ImageError),
     PaletteError(imagequant::Error),
+    MipmapError,
 }
 
 impl Error for TextureEncodeError {}
@@ -23,6 +25,9 @@ impl fmt::Display for TextureEncodeError {
         match self {
             Self::EncodeError(err) => write!(f, "{err}"),
             Self::PaletteError(err) => write!(f, "{err}"),
+            Self::MipmapError => {
+                write!(f, "The given texture format type doesn't support mipmaps.")
+            }
         }
     }
 }
@@ -88,23 +93,86 @@ impl TextureEncoder {
         }
     }
 
+    pub fn with_mipmaps(mut self) -> Result<Self, TextureEncodeError> {
+        match self.data_format {
+            DataFormat::Dxt1 | DataFormat::Rgb565 | DataFormat::Rgb5a3 => {
+                self.data_flags.set(DataFlags::Mipmaps, true);
+                Ok(self)
+            }
+            _ => Err(TextureEncodeError::MipmapError),
+        }
+    }
+
+    fn encode_image(&self, rgba_img: &RgbaImage) -> Result<Vec<u8>, TextureEncodeError> {
+        match self.data_format {
+            DataFormat::Rgb565 => Ok(encode_pixels_rgb565(rgba_img)),
+            DataFormat::Rgb5a3 => Ok(encode_pixels_rgb5a3(rgba_img)),
+            DataFormat::Argb8888 => Ok(encode_pixels_argb8888(rgba_img)),
+            DataFormat::IntensityA4 => Ok(encode_pixels_intensity_alpha4(rgba_img)),
+            DataFormat::IntensityA8 => Ok(encode_pixels_intensity_alpha8(rgba_img)),
+            DataFormat::Intensity4 => Ok(encode_pixels_intensity_4(rgba_img)),
+            DataFormat::Intensity8 => Ok(encode_pixels_intensity_8(rgba_img)),
+            DataFormat::Index8 => Ok(encode_pixels_with_palette_index8(
+                rgba_img,
+                self.pixel_format,
+            )?),
+            DataFormat::Index4 => Ok(encode_pixels_with_palette_index4(
+                rgba_img,
+                self.pixel_format,
+            )?),
+            DataFormat::Dxt1 => Ok(encode_pixels_dxt1(rgba_img)),
+        }
+    }
+
+    fn encode_mipmap_image(&self, img: &RgbaImage) -> Vec<u8> {
+        match self.data_format {
+            DataFormat::Rgb5a3 => encode_pixels_rgb5a3(img),
+            DataFormat::Rgb565 => encode_pixels_rgb565(img),
+            DataFormat::Dxt1 => encode_pixels_dxt1(img),
+            _ => unreachable!(),
+        }
+    }
+
+    fn encode_mipmaps(&self, img: &RgbaImage) -> Vec<u8> {
+        let mut mipmaps: Vec<u8> = vec![];
+        let mipmap_count = img.width().ilog2();
+        let mut tex_size = img.width() / 2;
+
+        for _ in 0..mipmap_count {
+            if tex_size < 1 {
+                break;
+            }
+
+            let mipmap = DynamicImage::ImageRgba8(img.clone()).resize_exact(
+                tex_size,
+                tex_size,
+                FilterType::Triangle,
+            );
+
+            let mut encoded = self.encode_mipmap_image(&mipmap.into_rgba8());
+
+            if encoded.len() < 32 {
+                encoded.resize(32, 0);
+            }
+
+            mipmaps.append(&mut encoded);
+            tex_size /= 2;
+        }
+
+        mipmaps
+    }
+
     pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, TextureEncodeError> {
         let mut result = Vec::new();
         let img = ImageReader::open(img_path)?.decode()?;
         let rgba_img = img.into_rgba8();
 
-        let encoded = match self.data_format {
-            DataFormat::Rgb565 => encode_pixels_rgb565(&rgba_img),
-            DataFormat::Rgb5a3 => encode_pixels_rgb5a3(&rgba_img),
-            DataFormat::Argb8888 => encode_pixels_argb8888(&rgba_img),
-            DataFormat::IntensityA4 => encode_pixels_intensity_alpha4(&rgba_img),
-            DataFormat::IntensityA8 => encode_pixels_intensity_alpha8(&rgba_img),
-            DataFormat::Intensity4 => encode_pixels_intensity_4(&rgba_img),
-            DataFormat::Intensity8 => encode_pixels_intensity_8(&rgba_img),
-            DataFormat::Index8 => encode_pixels_with_palette_index8(&rgba_img, self.pixel_format)?,
-            DataFormat::Index4 => encode_pixels_with_palette_index4(&rgba_img, self.pixel_format)?,
-            DataFormat::Dxt1 => encode_pixels_dxt1(&rgba_img),
-        };
+        let mut encoded = self.encode_image(&rgba_img)?;
+
+        if self.data_flags.intersects(DataFlags::Mipmaps) {
+            let mut encoded_mipmaps = self.encode_mipmaps(&rgba_img);
+            encoded.append(&mut encoded_mipmaps);
+        }
 
         self.write_header(&rgba_img, &encoded, &mut result)?;
         result.write_all(&encoded)?;

@@ -179,6 +179,8 @@ impl Iterator for DxtBlockIterator<'_> {
             }
         }
 
+        block.resize(64, 0);
+
         self.x_block += 4;
         if self.x_block == 8 {
             self.x_block = 0;
