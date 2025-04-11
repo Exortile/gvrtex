@@ -131,7 +131,7 @@ impl Iterator for PixelBlockIteratorExt {
     }
 }
 
-pub struct DxtBlockIterator<'a> {
+pub struct EncodeDxtBlockIterator<'a> {
     image: &'a RgbaImage,
     width: u32,
     height: u32,
@@ -142,7 +142,7 @@ pub struct DxtBlockIterator<'a> {
     y_block: u32,
 }
 
-impl<'a> DxtBlockIterator<'a> {
+impl<'a> EncodeDxtBlockIterator<'a> {
     pub fn new(image: &'a RgbaImage) -> Self {
         Self {
             image,
@@ -157,7 +157,7 @@ impl<'a> DxtBlockIterator<'a> {
     }
 }
 
-impl Iterator for DxtBlockIterator<'_> {
+impl Iterator for EncodeDxtBlockIterator<'_> {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -203,5 +203,63 @@ impl Iterator for DxtBlockIterator<'_> {
         }
 
         Some(block)
+    }
+}
+
+pub struct DecodeDxtBlockIterator {
+    width: u32,
+    height: u32,
+
+    x: u32,
+    y: u32,
+    x_block: u32,
+    y_block: u32,
+}
+
+impl DecodeDxtBlockIterator {
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+
+            x: 0,
+            y: 0,
+            x_block: 0,
+            y_block: 0,
+        }
+    }
+}
+
+impl Iterator for DecodeDxtBlockIterator {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.y >= self.height {
+            return None;
+        }
+
+        let coords = (self.x_block + self.x, self.y_block + self.y);
+
+        self.x_block += 4;
+        if self.x_block == 8 {
+            self.x_block = 0;
+            self.y_block += 4;
+        } else {
+            return Some(coords);
+        }
+
+        if self.y_block == 8 {
+            self.y_block = 0;
+            self.x += 8;
+        } else {
+            return Some(coords);
+        }
+
+        if self.x >= self.width {
+            self.x = 0;
+            self.y += 8;
+        }
+
+        Some(coords)
     }
 }

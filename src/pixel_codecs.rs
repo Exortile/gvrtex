@@ -1,11 +1,16 @@
-use std::io::Cursor;
+use std::io::{Cursor, Seek};
 
 use crate::{
     formats::PixelFormat,
-    iter::{DxtBlockIterator, PixelBlockIterator, PixelBlockIteratorExt},
+    iter::{
+        DecodeDxtBlockIterator, EncodeDxtBlockIterator, PixelBlockIterator, PixelBlockIteratorExt,
+    },
 };
 use byteorder::{BigEndian, ReadBytesExt};
 use image::{Pixel, Rgba, RgbaImage};
+
+const INDEX4_PALETTE_SIZE: u32 = 16;
+const INDEX8_PALETTE_SIZE: u32 = 256;
 
 /// Returns a copy of the given RGBA `image` as a vector of pixels that's suitable
 /// for in use with [`imagequant`].
@@ -92,6 +97,34 @@ fn encode_palette(palette: Vec<imagequant::RGBA>, palette_pixel_format: PixelFor
     }
 
     result
+}
+
+fn decode_palette(
+    cursor: &mut Cursor<&[u8]>,
+    palette_pixel_format: PixelFormat,
+    palette_size: u32,
+) -> Result<Vec<Rgba<u8>>, std::io::Error> {
+    let mut result = Vec::with_capacity(palette_size as usize);
+
+    for _ in 0..palette_size {
+        match palette_pixel_format {
+            PixelFormat::IntensityA8 => {
+                let alpha = cursor.read_u8()?;
+                let pixel = cursor.read_u8()?;
+                result.push(decode_pixel_intensity_alpha8(pixel, alpha));
+            }
+            PixelFormat::RGB565 => {
+                let color = cursor.read_u16::<BigEndian>()?;
+                result.push(decode_pixel_rgb565(color));
+            }
+            PixelFormat::RGB5A3 => {
+                let color = cursor.read_u16::<BigEndian>()?;
+                result.push(decode_pixel_rgb5a3(color));
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 ////////////////////////
@@ -291,7 +324,7 @@ pub fn encode_pixels_dxt1(image: &RgbaImage) -> Vec<u8> {
     let dest_size = (width * height / 2).try_into().unwrap();
     let mut dest: Vec<u8> = Vec::with_capacity(dest_size);
 
-    for block in DxtBlockIterator::new(image) {
+    for block in EncodeDxtBlockIterator::new(image) {
         dest.append(&mut compress_block_to_bc1(&block));
     }
 
@@ -443,7 +476,7 @@ pub fn encode_pixels_with_palette_index8(
     let width = image.width();
     let height = image.height();
 
-    let (palette, indices) = palettize_image(image, 256, palette_pixel_format)?;
+    let (palette, indices) = palettize_image(image, INDEX8_PALETTE_SIZE, palette_pixel_format)?;
     let mut result = encode_palette(palette, palette_pixel_format);
 
     for (x, y) in PixelBlockIterator::new(width, height, 8, 4) {
@@ -461,7 +494,7 @@ pub fn encode_pixels_with_palette_index4(
     let width = image.width();
     let height = image.height();
 
-    let (palette, indices) = palettize_image(image, 16, palette_pixel_format)?;
+    let (palette, indices) = palettize_image(image, INDEX4_PALETTE_SIZE, palette_pixel_format)?;
     let mut result = encode_palette(palette, palette_pixel_format);
 
     // Resize vec to fill entire image data size (with palette)
@@ -629,6 +662,107 @@ pub fn decode_pixels_intensity_4(
         let pixel = (data[idx / 2] >> ((!col & 0x1) * 4)) & 0x0F;
         let c = (pixel as f32 * 255. / 15.) as u8;
         image.put_pixel(x, y, [c, c, c, 0xFF].into());
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_with_palette_index8(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    palette_pixel_format: PixelFormat,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    let palette = decode_palette(&mut cursor, palette_pixel_format, INDEX8_PALETTE_SIZE)?;
+
+    for (x, y) in PixelBlockIterator::new(width, height, 8, 4) {
+        let palette_idx = cursor.read_u8()?;
+        image.put_pixel(x, y, palette[palette_idx as usize]);
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_with_palette_index4(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    palette_pixel_format: PixelFormat,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+
+    let palette = decode_palette(&mut cursor, palette_pixel_format, INDEX4_PALETTE_SIZE)?;
+    const PALETTE_SIZE_BYTES: usize = INDEX4_PALETTE_SIZE as usize * size_of::<u16>();
+
+    for (idx, (_, col, x, y)) in PixelBlockIteratorExt::new(width, height, 8, 8).enumerate() {
+        let palette_idx =
+            (data[PALETTE_SIZE_BYTES + (idx / 2)] >> ((col % 2 == 0) as u8 * 4)) & 0x0F;
+        image.put_pixel(x, y, palette[palette_idx as usize]);
+    }
+
+    Ok(image)
+}
+
+pub fn decode_pixels_dxt1(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, std::io::Error> {
+    let mut image = RgbaImage::new(width, height);
+    let mut cursor = Cursor::new(data);
+    let mut src_idx = 0;
+    let colors: &mut [Rgba<u8>] = &mut [[0, 0, 0, 0].into(); 4];
+
+    for (x, y) in DecodeDxtBlockIterator::new(width, height) {
+        cursor.seek(std::io::SeekFrom::Start(src_idx))?;
+        let encoded_1 = cursor.read_u16::<BigEndian>()?;
+        let encoded_2 = cursor.read_u16::<BigEndian>()?;
+
+        colors[0] = decode_pixel_rgb565(encoded_1);
+        colors[1] = decode_pixel_rgb565(encoded_2);
+
+        if encoded_1 > encoded_2 {
+            colors[2] = [
+                ((colors[0].0[0] as u32 * 2 + colors[1].0[0] as u32) / 3) as u8,
+                ((colors[0].0[1] as u32 * 2 + colors[1].0[1] as u32) / 3) as u8,
+                ((colors[0].0[2] as u32 * 2 + colors[1].0[2] as u32) / 3) as u8,
+                0xFF,
+            ]
+            .into();
+
+            colors[3] = [
+                ((colors[1].0[0] as u32 * 2 + colors[0].0[0] as u32) / 3) as u8,
+                ((colors[1].0[1] as u32 * 2 + colors[0].0[1] as u32) / 3) as u8,
+                ((colors[1].0[2] as u32 * 2 + colors[0].0[2] as u32) / 3) as u8,
+                0xFF,
+            ]
+            .into();
+        } else {
+            colors[2] = [
+                ((colors[0].0[0] as u32 + colors[1].0[0] as u32) / 2) as u8,
+                ((colors[0].0[1] as u32 + colors[1].0[1] as u32) / 2) as u8,
+                ((colors[0].0[2] as u32 + colors[1].0[2] as u32) / 2) as u8,
+                0xFF,
+            ]
+            .into();
+
+            colors[3] = [0, 0, 0, 0].into();
+        }
+
+        src_idx += 4;
+
+        for y2 in (0..4).take_while(|i| y + i < height) {
+            for x2 in (0..4).take_while(|i| x + i < width) {
+                let color_idx = (data[(src_idx + y2 as u64) as usize] >> (6 - x2 * 2)) & 0x3;
+                image.put_pixel(x + x2, y + y2, colors[color_idx as usize]);
+            }
+        }
+
+        src_idx += 4;
     }
 
     Ok(image)

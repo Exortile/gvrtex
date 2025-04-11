@@ -1,5 +1,7 @@
 use bitflags::bitflags;
 
+use crate::TextureDecodeError;
+
 #[derive(Default, PartialEq, Eq)]
 pub enum TextureType {
     #[default]
@@ -19,6 +21,19 @@ pub enum PixelFormat {
 impl From<PixelFormat> for u8 {
     fn from(value: PixelFormat) -> Self {
         value as u8
+    }
+}
+
+impl TryFrom<u8> for PixelFormat {
+    type Error = TextureDecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::IntensityA8),
+            1 => Ok(Self::RGB565),
+            2 => Ok(Self::RGB5A3),
+            _ => Err(TextureDecodeError::InvalidFile),
+        }
     }
 }
 

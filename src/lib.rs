@@ -6,16 +6,19 @@ use image::{DynamicImage, ImageError, ImageReader, RgbaImage};
 use std::error::Error;
 use std::fmt;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::ops::Not;
 
 pub mod formats;
 mod iter;
 mod pixel_codecs;
+mod codec;
 
 #[derive(Debug)]
 pub enum TextureEncodeError {
     EncodeError(ImageError),
     PaletteError(imagequant::Error),
     MipmapError,
+    FormatError,
 }
 
 impl Error for TextureEncodeError {}
@@ -28,6 +31,10 @@ impl fmt::Display for TextureEncodeError {
             Self::MipmapError => {
                 write!(f, "The given texture format type doesn't support mipmaps.")
             }
+            Self::FormatError => write!(
+                f,
+                "Incorrect or incompatible formats supplied for texture encoding."
+            ),
         }
     }
 }
@@ -59,38 +66,66 @@ pub struct TextureEncoder {
 }
 
 impl TextureEncoder {
-    pub fn new_gcix_palettized(pixel_format: PixelFormat, data_format: DataFormat) -> Self {
-        Self {
+    fn check_given_formats(data_format: DataFormat) -> Result<(), TextureEncodeError> {
+        match data_format {
+            DataFormat::Index4 | DataFormat::Index8 => Err(TextureEncodeError::FormatError),
+            _ => Ok(()),
+        }
+    }
+
+    fn check_given_formats_palettized(data_format: DataFormat) -> Result<(), TextureEncodeError> {
+        match data_format {
+            DataFormat::Index4 | DataFormat::Index8 => Ok(()),
+            _ => Err(TextureEncodeError::FormatError),
+        }
+    }
+
+    pub fn new_gcix_palettized(
+        pixel_format: PixelFormat,
+        data_format: DataFormat,
+    ) -> Result<Self, TextureEncodeError> {
+        Self::check_given_formats_palettized(data_format)?;
+
+        Ok(Self {
             texture_type: TextureType::GCIX,
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
-        }
+        })
     }
 
-    pub fn new_gcix(data_format: DataFormat) -> Self {
-        Self {
+    pub fn new_gcix(data_format: DataFormat) -> Result<Self, TextureEncodeError> {
+        Self::check_given_formats(data_format)?;
+
+        Ok(Self {
             texture_type: TextureType::GCIX,
             data_format,
             ..Default::default()
-        }
+        })
     }
 
-    pub fn new_gbix_palettized(pixel_format: PixelFormat, data_format: DataFormat) -> Self {
-        Self {
+    pub fn new_gbix_palettized(
+        pixel_format: PixelFormat,
+        data_format: DataFormat,
+    ) -> Result<Self, TextureEncodeError> {
+        Self::check_given_formats_palettized(data_format)?;
+
+        Ok(Self {
             texture_type: TextureType::GBIX,
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
-        }
+        })
     }
 
-    pub fn new_gbix(data_format: DataFormat) -> Self {
-        Self {
+    pub fn new_gbix(data_format: DataFormat) -> Result<Self, TextureEncodeError> {
+        Self::check_given_formats(data_format)?;
+
+        Ok(Self {
             texture_type: TextureType::GBIX,
             data_format,
             ..Default::default()
-        }
+        })
     }
 
     pub fn with_mipmaps(mut self) -> Result<Self, TextureEncodeError> {
@@ -282,8 +317,29 @@ impl TextureDecoder {
             .try_into()
             .unwrap();
 
-        self.cursor.seek(SeekFrom::Start(0x1B))?;
+        self.cursor.seek(SeekFrom::Start(0x1A))?;
+
+        let flags = self.cursor.read_u8()?;
+        let Some(data_flags) = DataFlags::from_bits(flags & 0xF) else {
+            return Err(TextureDecodeError::InvalidFile);
+        };
+        let Ok(palette_format) = PixelFormat::try_from((flags >> 4) & 0xF) else {
+            return Err(TextureDecodeError::InvalidFile);
+        };
+
         let data_format: DataFormat = DataFormat::try_from(self.cursor.read_u8()?)?;
+
+        if data_flags.intersects(DataFlags::ExternalPalette) {
+            unimplemented!();
+        }
+
+        // Check if data format is matching if a palette is included
+        if data_flags.intersects(DataFlags::InternalPalette)
+            && matches!(data_format, DataFormat::Index4 | DataFormat::Index8).not()
+        {
+            return Err(TextureDecodeError::InvalidFile);
+        }
+
         let width = self.cursor.read_u16::<BigEndian>()?;
         let height = self.cursor.read_u16::<BigEndian>()?;
 
@@ -319,7 +375,19 @@ impl TextureDecoder {
                 width.into(),
                 height.into(),
             )?),
-            _ => unimplemented!(),
+            DataFormat::Index8 => Some(decode_pixels_with_palette_index8(
+                &data,
+                width.into(),
+                height.into(),
+                palette_format,
+            )?),
+            DataFormat::Index4 => Some(decode_pixels_with_palette_index4(
+                &data,
+                width.into(),
+                height.into(),
+                palette_format,
+            )?),
+            DataFormat::Dxt1 => Some(decode_pixels_dxt1(&data, width.into(), height.into())?),
         };
 
         Ok(())
@@ -368,6 +436,9 @@ impl TextureDecoder {
         Ok(result)
     }
 
+    /// This function checks if the magic strings "GCIX" and "GVRT" in the file match.
+    /// It doesn't check the actual validity of the data in the headers, that's done in
+    /// [`Self::decode()`]
     fn is_valid_gvr(&mut self) -> Result<(), TextureDecodeError> {
         let type_magic = self.read_string(4)?;
         if type_magic != "GCIX" && type_magic != "GBIX" {
