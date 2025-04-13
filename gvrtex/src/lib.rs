@@ -9,7 +9,7 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::Not;
 
 mod codec;
-mod error;
+pub mod error;
 pub mod formats;
 mod iter;
 mod pixel_codecs;
