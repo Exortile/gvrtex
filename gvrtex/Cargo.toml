@@ -1,0 +1,14 @@
+[package]
+name = "gvrtex"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bitflags = "2.9.0"
+byteorder = "1.5.0"
+image = "0.25.6"
+imagequant = "4.3.4"
+log = "0.4.27"
+gvrtex_macros = { path = "../gvrtex_macros" }

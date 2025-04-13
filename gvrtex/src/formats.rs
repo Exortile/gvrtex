@@ -1,6 +1,5 @@
-use bitflags::bitflags;
-
 use crate::TextureDecodeError;
+use bitflags::bitflags;
 
 #[derive(Default, PartialEq, Eq)]
 pub enum TextureType {
@@ -75,6 +74,16 @@ impl TryFrom<u8> for DataFormat {
             0x09 => Ok(Self::Index8),
             0x0E => Ok(Self::Dxt1),
             _ => Err("Invalid value for DataFormat enum"),
+        }
+    }
+}
+
+impl From<PixelFormat> for DataFormat {
+    fn from(value: PixelFormat) -> Self {
+        match value {
+            PixelFormat::RGB565 => Self::Rgb565,
+            PixelFormat::RGB5A3 => Self::Rgb5a3,
+            PixelFormat::IntensityA8 => Self::IntensityA8,
         }
     }
 }

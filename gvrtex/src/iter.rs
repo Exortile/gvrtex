@@ -67,7 +67,9 @@ pub struct PixelBlockIterator {
 }
 
 impl PixelBlockIterator {
-    pub fn new(width: u32, height: u32, x_block_size: u32, y_block_size: u32) -> Self {
+    pub fn new(width: u32, height: u32, block_size: (u32, u32)) -> Self {
+        let (x_block_size, y_block_size) = block_size;
+
         Self {
             width,
             height,
@@ -102,9 +104,9 @@ pub struct PixelBlockIteratorExt {
 }
 
 impl PixelBlockIteratorExt {
-    pub fn new(width: u32, height: u32, x_block_size: u32, y_block_size: u32) -> Self {
+    pub fn new(width: u32, height: u32, block_size: (u32, u32)) -> Self {
         Self {
-            iterator: PixelBlockIterator::new(width, height, x_block_size, y_block_size),
+            iterator: PixelBlockIterator::new(width, height, block_size),
             blocks: 0,
         }
     }

@@ -284,9 +284,18 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.9.0",
  "byteorder",
+ "gvrtex_macros",
  "image",
  "imagequant",
  "log",
+]
+
+[[package]]
+name = "gvrtex_macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]

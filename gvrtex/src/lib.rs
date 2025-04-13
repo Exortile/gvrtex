@@ -1,61 +1,18 @@
+use crate::error::*;
 use crate::formats::{DataFlags, DataFormat, PixelFormat, TextureType};
 use crate::pixel_codecs::*;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use codec::GvrEncoder;
 use image::imageops::FilterType;
-use image::{DynamicImage, ImageError, ImageReader, RgbaImage};
-use std::error::Error;
-use std::fmt;
+use image::{DynamicImage, ImageReader, RgbaImage};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::Not;
 
+mod codec;
+mod error;
 pub mod formats;
 mod iter;
 mod pixel_codecs;
-mod codec;
-
-#[derive(Debug)]
-pub enum TextureEncodeError {
-    EncodeError(ImageError),
-    PaletteError(imagequant::Error),
-    MipmapError,
-    FormatError,
-}
-
-impl Error for TextureEncodeError {}
-
-impl fmt::Display for TextureEncodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EncodeError(err) => write!(f, "{err}"),
-            Self::PaletteError(err) => write!(f, "{err}"),
-            Self::MipmapError => {
-                write!(f, "The given texture format type doesn't support mipmaps.")
-            }
-            Self::FormatError => write!(
-                f,
-                "Incorrect or incompatible formats supplied for texture encoding."
-            ),
-        }
-    }
-}
-
-impl From<ImageError> for TextureEncodeError {
-    fn from(value: ImageError) -> Self {
-        Self::EncodeError(value)
-    }
-}
-
-impl From<imagequant::Error> for TextureEncodeError {
-    fn from(value: imagequant::Error) -> Self {
-        Self::PaletteError(value)
-    }
-}
-
-impl From<std::io::Error> for TextureEncodeError {
-    fn from(value: std::io::Error) -> Self {
-        Self::EncodeError(ImageError::IoError(value))
-    }
-}
 
 #[derive(Default)]
 pub struct TextureEncoder {
@@ -68,7 +25,7 @@ pub struct TextureEncoder {
 impl TextureEncoder {
     fn check_given_formats(data_format: DataFormat) -> Result<(), TextureEncodeError> {
         match data_format {
-            DataFormat::Index4 | DataFormat::Index8 => Err(TextureEncodeError::FormatError),
+            DataFormat::Index4 | DataFormat::Index8 => Err(TextureEncodeError::Format),
             _ => Ok(()),
         }
     }
@@ -76,7 +33,7 @@ impl TextureEncoder {
     fn check_given_formats_palettized(data_format: DataFormat) -> Result<(), TextureEncodeError> {
         match data_format {
             DataFormat::Index4 | DataFormat::Index8 => Ok(()),
-            _ => Err(TextureEncodeError::FormatError),
+            _ => Err(TextureEncodeError::Format),
         }
     }
 
@@ -134,41 +91,11 @@ impl TextureEncoder {
                 self.data_flags.set(DataFlags::Mipmaps, true);
                 Ok(self)
             }
-            _ => Err(TextureEncodeError::MipmapError),
+            _ => Err(TextureEncodeError::Mipmap),
         }
     }
 
-    fn encode_image(&self, rgba_img: &RgbaImage) -> Result<Vec<u8>, TextureEncodeError> {
-        match self.data_format {
-            DataFormat::Rgb565 => Ok(encode_pixels_rgb565(rgba_img)),
-            DataFormat::Rgb5a3 => Ok(encode_pixels_rgb5a3(rgba_img)),
-            DataFormat::Argb8888 => Ok(encode_pixels_argb8888(rgba_img)),
-            DataFormat::IntensityA4 => Ok(encode_pixels_intensity_alpha4(rgba_img)),
-            DataFormat::IntensityA8 => Ok(encode_pixels_intensity_alpha8(rgba_img)),
-            DataFormat::Intensity4 => Ok(encode_pixels_intensity_4(rgba_img)),
-            DataFormat::Intensity8 => Ok(encode_pixels_intensity_8(rgba_img)),
-            DataFormat::Index8 => Ok(encode_pixels_with_palette_index8(
-                rgba_img,
-                self.pixel_format,
-            )?),
-            DataFormat::Index4 => Ok(encode_pixels_with_palette_index4(
-                rgba_img,
-                self.pixel_format,
-            )?),
-            DataFormat::Dxt1 => Ok(encode_pixels_dxt1(rgba_img)),
-        }
-    }
-
-    fn encode_mipmap_image(&self, img: &RgbaImage) -> Vec<u8> {
-        match self.data_format {
-            DataFormat::Rgb5a3 => encode_pixels_rgb5a3(img),
-            DataFormat::Rgb565 => encode_pixels_rgb565(img),
-            DataFormat::Dxt1 => encode_pixels_dxt1(img),
-            _ => unreachable!(),
-        }
-    }
-
-    fn encode_mipmaps(&self, img: &RgbaImage) -> Vec<u8> {
+    fn encode_mipmaps(&self, img: &RgbaImage, encoder: &dyn GvrEncoder) -> Vec<u8> {
         let mut mipmaps: Vec<u8> = vec![];
         let mipmap_count = img.width().ilog2();
         let mut tex_size = img.width() / 2;
@@ -184,7 +111,7 @@ impl TextureEncoder {
                 FilterType::Triangle,
             );
 
-            let mut encoded = self.encode_mipmap_image(&mipmap.into_rgba8());
+            let mut encoded = encoder.encode(&mipmap.into_rgba8());
 
             if encoded.len() < 32 {
                 encoded.resize(32, 0);
@@ -202,11 +129,20 @@ impl TextureEncoder {
         let img = ImageReader::open(img_path)?.decode()?;
         let rgba_img = img.into_rgba8();
 
-        let mut encoded = self.encode_image(&rgba_img)?;
+        let mut encoded;
+        if self.data_flags.intersects(DataFlags::InternalPalette) {
+            let encoder = create_new_encoder_with_palette(self.data_format);
+            encoder.validate_input(&rgba_img)?;
+            encoded = encoder.encode(&rgba_img, self.pixel_format)?;
+        } else {
+            let encoder = create_new_encoder(self.data_format);
+            encoder.validate_input(&rgba_img)?;
+            encoded = encoder.encode(&rgba_img);
 
-        if self.data_flags.intersects(DataFlags::Mipmaps) {
-            let mut encoded_mipmaps = self.encode_mipmaps(&rgba_img);
-            encoded.append(&mut encoded_mipmaps);
+            if self.data_flags.intersects(DataFlags::Mipmaps) {
+                let mut encoded_mipmaps = self.encode_mipmaps(&rgba_img, &*encoder);
+                encoded.append(&mut encoded_mipmaps);
+            }
         }
 
         self.write_header(&rgba_img, &encoded, &mut result)?;
@@ -243,47 +179,6 @@ impl TextureEncoder {
         buf.write_u16::<BigEndian>(image.height().try_into().unwrap())?;
 
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub enum TextureDecodeError {
-    InvalidFile,
-    UndecodedError,
-    ParseError(&'static str),
-    IoError(std::io::Error),
-    ImageError(ImageError),
-}
-
-impl Error for TextureDecodeError {}
-
-impl fmt::Display for TextureDecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidFile => write!(f, "The given file is an invalid GVR texture file."),
-            Self::UndecodedError => write!(f, "This texture has not been decoded successfully."),
-            Self::IoError(err) => write!(f, "{err}"),
-            Self::ParseError(msg) => write!(f, "{msg}"),
-            Self::ImageError(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl From<std::io::Error> for TextureDecodeError {
-    fn from(value: std::io::Error) -> Self {
-        TextureDecodeError::IoError(value)
-    }
-}
-
-impl From<&'static str> for TextureDecodeError {
-    fn from(value: &'static str) -> Self {
-        TextureDecodeError::ParseError(value)
-    }
-}
-
-impl From<ImageError> for TextureDecodeError {
-    fn from(value: ImageError) -> Self {
-        TextureDecodeError::ImageError(value)
     }
 }
 
@@ -349,46 +244,14 @@ impl TextureDecoder {
             return Err(TextureDecodeError::InvalidFile);
         }
 
-        self.image = match data_format {
-            DataFormat::Rgb5a3 => Some(decode_pixels_rgb5a3(&data, width.into(), height.into())?),
-            DataFormat::Rgb565 => Some(decode_pixels_rgb565(&data, width.into(), height.into())?),
-            DataFormat::Argb8888 => {
-                Some(decode_pixels_argb8888(&data, width.into(), height.into())?)
-            }
-            DataFormat::IntensityA8 => Some(decode_pixels_intensity_alpha8(
-                &data,
-                width.into(),
-                height.into(),
-            )?),
-            DataFormat::IntensityA4 => Some(decode_pixels_intensity_alpha4(
-                &data,
-                width.into(),
-                height.into(),
-            )?),
-            DataFormat::Intensity8 => Some(decode_pixels_intensity_8(
-                &data,
-                width.into(),
-                height.into(),
-            )?),
-            DataFormat::Intensity4 => Some(decode_pixels_intensity_4(
-                &data,
-                width.into(),
-                height.into(),
-            )?),
-            DataFormat::Index8 => Some(decode_pixels_with_palette_index8(
-                &data,
-                width.into(),
-                height.into(),
-                palette_format,
-            )?),
-            DataFormat::Index4 => Some(decode_pixels_with_palette_index4(
-                &data,
-                width.into(),
-                height.into(),
-                palette_format,
-            )?),
-            DataFormat::Dxt1 => Some(decode_pixels_dxt1(&data, width.into(), height.into())?),
-        };
+        if data_flags.intersects(DataFlags::InternalPalette) {
+            let decoder = create_new_decoder_with_palette(data_format);
+            self.image =
+                Some(decoder.decode(&data, width.into(), height.into(), palette_format)?);
+        } else {
+            let decoder = create_new_decoder(data_format);
+            self.image = Some(decoder.decode(&data, width.into(), height.into())?);
+        }
 
         Ok(())
     }
@@ -405,12 +268,12 @@ impl TextureDecoder {
 
     /// Returns the decoded image, if [`Self::decode()`] has ran successfully, consuming `self`.
     ///
-    /// If the image hasn't been decoded yet, a [`TextureDecodeError::UndecodedError`] is returned.
+    /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
     pub fn into_decoded(self) -> Result<RgbaImage, TextureDecodeError> {
         if let Some(image) = self.image {
             Ok(image)
         } else {
-            Err(TextureDecodeError::UndecodedError)
+            Err(TextureDecodeError::Undecoded)
         }
     }
 
@@ -418,10 +281,10 @@ impl TextureDecoder {
     /// The format the file is saved in is derived from the file extension (.png, .jpg, etc.)
     /// in the given `path`.
     ///
-    /// If the image hasn't been decoded yet, a [`TextureDecodeError::UndecodedError`] is returned.
+    /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
     pub fn save(&self, path: &str) -> Result<(), TextureDecodeError> {
         if self.image.is_none() {
-            return Err(TextureDecodeError::UndecodedError);
+            return Err(TextureDecodeError::Undecoded);
         }
         self.image.as_ref().unwrap().save(path)?;
         Ok(())
