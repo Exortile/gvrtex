@@ -20,6 +20,7 @@ pub struct TextureEncoder {
     pixel_format: PixelFormat,
     data_format: DataFormat,
     data_flags: DataFlags,
+    global_index: u32,
 }
 
 impl TextureEncoder {
@@ -48,6 +49,7 @@ impl TextureEncoder {
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
+            ..Default::default()
         })
     }
 
@@ -72,6 +74,7 @@ impl TextureEncoder {
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
+            ..Default::default()
         })
     }
 
@@ -93,6 +96,11 @@ impl TextureEncoder {
             }
             _ => Err(TextureEncodeError::Mipmap),
         }
+    }
+
+    pub fn with_global_index(mut self, global_index: u32) -> Self {
+        self.global_index = global_index;
+        self
     }
 
     fn encode_mipmaps(&self, img: &RgbaImage, encoder: &dyn GvrEncoder) -> Vec<u8> {
@@ -163,6 +171,7 @@ impl TextureEncoder {
             buf.write_all(b"GBIX")?;
         }
         buf.write_u32::<LittleEndian>(8)?;
+        buf.write_u32::<BigEndian>(self.global_index)?;
         buf.resize(0x10, 0); // padding
 
         buf.write_all(b"GVRT")?;
