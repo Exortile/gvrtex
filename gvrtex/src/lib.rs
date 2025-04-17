@@ -188,8 +188,15 @@ impl TextureEncoder {
 
     /// Instructs the encoder to also generate mipmaps alongside the original texture.
     ///
+    /// <div class="warning">
+    ///
     /// The only data formats that support mipmaps are [`DataFormat::Dxt1`],
     /// [`DataFormat::Rgb565`], and [`DataFormat::Rgb5a3`].
+    ///
+    /// </div>
+    ///
+    /// If you try to enable mipmaps on data formats that aren't listed above, a
+    /// [`TextureEncodeError::Mipmap`] error is returned.
     pub fn with_mipmaps(mut self) -> Result<Self, TextureEncodeError> {
         match self.data_format {
             DataFormat::Dxt1 | DataFormat::Rgb565 | DataFormat::Rgb5a3 => {
