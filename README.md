@@ -38,7 +38,6 @@ To decode a GVR file into the respective image file:
 
 ```rust
 use gvrtex::error::TextureDecodeError;
-use gvrtex::formats::{DataFormat, PixelFormat};
 use gvrtex::TextureDecoder;
 
 fn example(gvr_path: &str, save_path: &str) -> Result<(), TextureDecodeError> {

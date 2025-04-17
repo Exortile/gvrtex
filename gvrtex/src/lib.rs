@@ -1,3 +1,58 @@
+//! gvrtex is a Rust library for interfacing with the GVR texture format used
+//! in GameCube/Wii games, for example Sonic Riders.
+//!
+//! It's essentially the same as a regular TPL texture file (the official texture
+//! file format for GameCube/Wii), but with GVR headers instead. The image data
+//! in the file remains the same as it is for TPL files, so that the game console can read it.
+//!
+//! # Examples
+//!
+//! Here's a few examples on how to encode and decode GVR texture files.
+//!
+//! Encoding an image into a GVR file:
+//!
+//! ```no_run
+//! use gvrtex::error::TextureEncodeError;
+//! use gvrtex::formats::DataFormat;
+//! use gvrtex::TextureEncoder;
+//!
+//! # fn main() -> Result<Vec<u8>, TextureEncodeError> {
+//! # let img_path: &str = "";
+//! let mut encoder = TextureEncoder::new_gcix(DataFormat::Dxt1)?;
+//! let encoded_file = encoder.encode(img_path)?;
+//! # Ok(encoded_file)
+//! # }
+//! ```
+//!
+//! Decoding a GVR file:
+//!
+//! ```no_run
+//! use gvrtex::error::TextureDecodeError;
+//! use gvrtex::TextureDecoder;
+//!
+//! # fn main() -> Result<(), TextureDecodeError> {
+//! # let gvr_path: &str = "";
+//! # let save_path: &str = "";
+//! // Reads the contents of the file in gvr_path, but doesn't decode it yet.
+//! let mut decoder = TextureDecoder::new(gvr_path)?;
+//!
+//! // Decode file, saving the result in the decoder
+//! decoder.decode()?;
+//!
+//! // Save the decoded image to the given path. The image format is derived from the file
+//! // extension in the path.
+//! decoder.save(save_path)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Hints
+//!
+//! Easiest place to start off is to look at [`TextureEncoder`] for encoding GVR textures and
+//! [`TextureDecoder`] for decoding GVR textures.
+
+#![warn(missing_docs)]
+
 use crate::error::*;
 use crate::formats::{DataFlags, DataFormat, PixelFormat, TextureType};
 use crate::pixel_codecs::*;
@@ -14,6 +69,13 @@ pub mod formats;
 mod iter;
 mod pixel_codecs;
 
+/// Provides all the functionality needed to encode a GVR texture file.
+///
+/// The encoder doesn't inherently provide a method to save the texture into a file, you will be
+/// given a [`Vec`] of bytes from [`Self::encode()`], which you can use and save all the bytes to a
+/// file yourself.
+///
+/// For examples, see the documentation on the root of the [`crate`]
 #[derive(Default)]
 pub struct TextureEncoder {
     texture_type: TextureType,
@@ -38,6 +100,15 @@ impl TextureEncoder {
         }
     }
 
+    /// Creates a new encoder, that encodes palettized GVR texture files using the given `data_format`
+    /// and `pixel_format`.
+    ///
+    /// This specific function sets the magic strings in the header of the encoded texture file to
+    /// "GCIX".
+    ///
+    /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
+    /// that isn't [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
+    /// that you don't want to generate a color palette for, see [`Self::new_gcix()`].
     pub fn new_gcix_palettized(
         pixel_format: PixelFormat,
         data_format: DataFormat,
@@ -45,7 +116,7 @@ impl TextureEncoder {
         Self::check_given_formats_palettized(data_format)?;
 
         Ok(Self {
-            texture_type: TextureType::GCIX,
+            texture_type: TextureType::Gcix,
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
@@ -53,16 +124,34 @@ impl TextureEncoder {
         })
     }
 
+    /// Creates a new encoder, that encodes GVR texture files using the given `data_format`.
+    ///
+    /// This specific function sets the magic strings in the header of the encoded texture file to
+    /// "GCIX".
+    ///
+    /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
+    /// that is [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
+    /// that you want to generate a color palette for, see [`Self::new_gcix_palettized()`], as that
+    /// allows you to set the data format for the color palette as well.
     pub fn new_gcix(data_format: DataFormat) -> Result<Self, TextureEncodeError> {
         Self::check_given_formats(data_format)?;
 
         Ok(Self {
-            texture_type: TextureType::GCIX,
+            texture_type: TextureType::Gcix,
             data_format,
             ..Default::default()
         })
     }
 
+    /// Creates a new encoder, that encodes palettized GVR texture files using the given `data_format`
+    /// and `pixel_format`.
+    ///
+    /// This specific function sets the magic strings in the header of the encoded texture file to
+    /// "GBIX".
+    ///
+    /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
+    /// that isn't [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
+    /// that you don't want to generate a color palette for, see [`Self::new_gbix()`].
     pub fn new_gbix_palettized(
         pixel_format: PixelFormat,
         data_format: DataFormat,
@@ -70,7 +159,7 @@ impl TextureEncoder {
         Self::check_given_formats_palettized(data_format)?;
 
         Ok(Self {
-            texture_type: TextureType::GBIX,
+            texture_type: TextureType::Gbix,
             pixel_format,
             data_format,
             data_flags: DataFlags::InternalPalette,
@@ -78,16 +167,29 @@ impl TextureEncoder {
         })
     }
 
+    /// Creates a new encoder, that encodes GVR texture files using the given `data_format`.
+    ///
+    /// This specific function sets the magic strings in the header of the encoded texture file to
+    /// "GBIX".
+    ///
+    /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
+    /// that is [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
+    /// that you want to generate a color palette for, see [`Self::new_gbix_palettized()`], as that
+    /// allows you to set the data format for the color palette as well.
     pub fn new_gbix(data_format: DataFormat) -> Result<Self, TextureEncodeError> {
         Self::check_given_formats(data_format)?;
 
         Ok(Self {
-            texture_type: TextureType::GBIX,
+            texture_type: TextureType::Gbix,
             data_format,
             ..Default::default()
         })
     }
 
+    /// Instructs the encoder to also generate mipmaps alongside the original texture.
+    ///
+    /// The only data formats that support mipmaps are [`DataFormat::Dxt1`],
+    /// [`DataFormat::Rgb565`], and [`DataFormat::Rgb5a3`].
     pub fn with_mipmaps(mut self) -> Result<Self, TextureEncodeError> {
         match self.data_format {
             DataFormat::Dxt1 | DataFormat::Rgb565 | DataFormat::Rgb5a3 => {
@@ -98,6 +200,10 @@ impl TextureEncoder {
         }
     }
 
+    /// Sets the global index in the header of the encoded GVR texture file.
+    ///
+    /// Most GameCube and Wii games don't really use this but some games do. If this method is not
+    /// used in the process of instantiating the encoder, then the global index will default to 0.
     pub fn with_global_index(mut self, global_index: u32) -> Self {
         self.global_index = global_index;
         self
@@ -132,6 +238,11 @@ impl TextureEncoder {
         mipmaps
     }
 
+    /// Encodes the image file given in `img_path` into a GVR texture.
+    ///
+    /// This method returns an in-memory representation of the file as a [`Vec`] of bytes.
+    /// If anything goes wrong in the encoding process, a [`TextureEncodeError`] is returned
+    /// instead.
     pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, TextureEncodeError> {
         let mut result = Vec::new();
         let img = ImageReader::open(img_path)?.decode()?;
@@ -165,7 +276,7 @@ impl TextureEncoder {
         encoded: &[u8],
         buf: &mut Vec<u8>,
     ) -> std::io::Result<()> {
-        if self.texture_type == TextureType::GCIX {
+        if self.texture_type == TextureType::Gcix {
             buf.write_all(b"GCIX")?;
         } else {
             buf.write_all(b"GBIX")?;
@@ -191,6 +302,14 @@ impl TextureEncoder {
     }
 }
 
+/// Provides all the functionality needed to decode a GVR texture file.
+///
+/// When the file is decoded using [`Self::decode()`], the image is not given to you from that
+/// method. You can retrieve it via [`Self::as_decoded()`] or [`Self::into_decoded()`], or if you
+/// don't want an in-memory representation of the file, you can immediately save the file via
+/// [`Self::save()`].
+///
+/// For examples, see the documentation on the root of the [`crate`]
 #[derive(Default)]
 pub struct TextureDecoder {
     cursor: Cursor<Vec<u8>>,
@@ -291,6 +410,9 @@ impl TextureDecoder {
     /// in the given `path`.
     ///
     /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
+    ///
+    /// This does not consume the decoder, so you can save the same image file as many times as you
+    /// want.
     pub fn save(&self, path: &str) -> Result<(), TextureDecodeError> {
         if self.image.is_none() {
             return Err(TextureDecodeError::Undecoded);
