@@ -1,3 +1,5 @@
+//! This crate provides internal macros used for the gvrtex crate.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};

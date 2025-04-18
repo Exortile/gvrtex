@@ -4,11 +4,10 @@ version = "0.1.0"
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
-description.workspace = true
+description = "Internal macros used by the gvrtex crate"
 repository.workspace = true
 categories.workspace = true
 keywords.workspace = true
-readme = "../README.md"
 
 [lib]
 proc-macro = true
