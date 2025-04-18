@@ -10,3 +10,7 @@ version = "0.1.0"
 authors = ["Sten-Kristjan Prantsu <xortile@gmail.com>"]
 license = "MIT"
 edition = "2021"
+repository = "https://github.com/Exortile/gvrtex"
+description = "gvrtex is a library for interfacing with the GVR texture format used on GameCube/Wii"
+categories = ["encoding", "game-engines"]
+keywords = ["gamecube", "wii", "gvr", "tpl"]
