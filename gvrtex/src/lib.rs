@@ -106,6 +106,8 @@ impl TextureEncoder {
     /// This specific function sets the magic strings in the header of the encoded texture file to
     /// "GCIX".
     ///
+    /// # Errors
+    ///
     /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
     /// that isn't [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
     /// that you don't want to generate a color palette for, see [`Self::new_gcix()`].
@@ -129,6 +131,8 @@ impl TextureEncoder {
     /// This specific function sets the magic strings in the header of the encoded texture file to
     /// "GCIX".
     ///
+    /// # Errors
+    ///
     /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
     /// that is [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
     /// that you want to generate a color palette for, see [`Self::new_gcix_palettized()`], as that
@@ -148,6 +152,8 @@ impl TextureEncoder {
     ///
     /// This specific function sets the magic strings in the header of the encoded texture file to
     /// "GBIX".
+    ///
+    /// # Errors
     ///
     /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
     /// that isn't [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
@@ -172,6 +178,8 @@ impl TextureEncoder {
     /// This specific function sets the magic strings in the header of the encoded texture file to
     /// "GBIX".
     ///
+    /// # Errors
+    ///
     /// This function will return a [`TextureEncodeError::Format`] if you pass in a data format
     /// that is [`DataFormat::Index4`] or [`DataFormat::Index8`]. If you want to encode textures
     /// that you want to generate a color palette for, see [`Self::new_gbix_palettized()`], as that
@@ -194,6 +202,8 @@ impl TextureEncoder {
     /// [`DataFormat::Rgb565`], and [`DataFormat::Rgb5a3`].
     ///
     /// </div>
+    ///
+    /// # Errors
     ///
     /// If you try to enable mipmaps on data formats that aren't listed above, a
     /// [`TextureEncodeError::Mipmap`] error is returned.
@@ -248,6 +258,9 @@ impl TextureEncoder {
     /// Encodes the image file given in `img_path` into a GVR texture.
     ///
     /// This method returns an in-memory representation of the file as a [`Vec`] of bytes.
+    ///
+    /// # Errors
+    ///
     /// If anything goes wrong in the encoding process, a [`TextureEncodeError`] is returned
     /// instead.
     pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, TextureEncodeError> {
@@ -328,6 +341,10 @@ impl TextureDecoder {
     /// reading the file's contents.
     ///
     /// This function doesn't decode the file by itself, [`Self::decode()`] must be called.
+    ///
+    /// # Errors
+    ///
+    /// An IO error will be returned if the given `gvr_path` is invalid in any way.
     pub fn new(gvr_path: &str) -> Result<Self, std::io::Error> {
         Ok(Self {
             cursor: Cursor::new(std::fs::read(gvr_path)?),
@@ -336,6 +353,8 @@ impl TextureDecoder {
     }
 
     /// Decodes the given image from [`Self::new()`].
+    ///
+    /// # Errors
     ///
     /// If something goes wrong while decoding, or the given file is not a valid GVR texture file,
     /// a [`TextureDecodeError`] is returned.
@@ -403,6 +422,8 @@ impl TextureDecoder {
 
     /// Returns the decoded image, if [`Self::decode()`] has ran successfully, consuming `self`.
     ///
+    /// # Errors
+    ///
     /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
     pub fn into_decoded(self) -> Result<RgbaImage, TextureDecodeError> {
         if let Some(image) = self.image {
@@ -416,10 +437,12 @@ impl TextureDecoder {
     /// The format the file is saved in is derived from the file extension (.png, .jpg, etc.)
     /// in the given `path`.
     ///
-    /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
-    ///
     /// This does not consume the decoder, so you can save the same image file as many times as you
     /// want.
+    ///
+    /// # Errors
+    ///
+    /// If the image hasn't been decoded yet, a [`TextureDecodeError::Undecoded`] is returned.
     pub fn save(&self, path: &str) -> Result<(), TextureDecodeError> {
         if self.image.is_none() {
             return Err(TextureDecodeError::Undecoded);
