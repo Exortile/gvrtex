@@ -16,4 +16,4 @@ byteorder = "1.5.0"
 image = "0.25.6"
 imagequant = "4.3.4"
 log = "0.4.27"
-gvrtex_macros = { version = "0.1.0", path = "../gvrtex_macros" }
+gvrtex_macros = { version = "0.1.1", path = "../gvrtex_macros" }

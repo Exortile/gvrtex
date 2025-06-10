@@ -264,8 +264,28 @@ impl TextureEncoder {
     /// If anything goes wrong in the encoding process, a [`TextureEncodeError`] is returned
     /// instead.
     pub fn encode(&mut self, img_path: &str) -> Result<Vec<u8>, TextureEncodeError> {
-        let mut result = Vec::new();
         let img = ImageReader::open(img_path)?.decode()?;
+        self.encode_internal(img)
+    }
+
+    /// Encodes the image file given in the `image_buffer` into a GVR texture. The format of the
+    /// image is guessed.
+    ///
+    /// This method returns an in-memory representation of the file as a [`Vec`] of bytes.
+    ///
+    /// # Errors
+    ///
+    /// If anything goes wrong in the encoding process, a [`TextureEncodeError`] is returned
+    /// instead.
+    pub fn encode_buffer(&mut self, image_buffer: Vec<u8>) -> Result<Vec<u8>, TextureEncodeError> {
+        let img = ImageReader::new(Cursor::new(image_buffer))
+            .with_guessed_format()?
+            .decode()?;
+        self.encode_internal(img)
+    }
+
+    fn encode_internal(&mut self, img: DynamicImage) -> Result<Vec<u8>, TextureEncodeError> {
+        let mut result = Vec::new();
         let rgba_img = img.into_rgba8();
 
         let mut encoded;
@@ -350,6 +370,24 @@ impl TextureDecoder {
             cursor: Cursor::new(std::fs::read(gvr_path)?),
             ..Default::default()
         })
+    }
+
+    /// Instantiate a new [`TextureDecoder`], that can decode the texture in the given `buffer`.
+    ///
+    /// This function doesn't decode the file by itself, [`Self::decode()`] must be called.
+    ///
+    /// # Notes
+    ///
+    /// The start of the `buffer` should properly point to the start of the texture.
+    ///
+    /// The length of `buffer` should be large enough to contain the whole texture. It can be
+    /// bigger than the actual texture data, the `buffer` will only be read up until the full
+    /// length of the texture.
+    pub fn new_from_buffer(buffer: Vec<u8>) -> Self {
+        Self {
+            cursor: Cursor::new(buffer),
+            ..Default::default()
+        }
     }
 
     /// Decodes the given image from [`Self::new()`].
