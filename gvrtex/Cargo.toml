@@ -17,3 +17,10 @@ image = "0.25.6"
 imagequant = "4.3.4"
 log = "0.4.27"
 gvrtex_macros = { version = "0.1.1", path = "../gvrtex_macros" }
+cxx = "1.0"
+
+[build-dependencies]
+cxx-build = "1.0"
+
+[lib]
+crate-type = ["staticlib"]

@@ -68,6 +68,7 @@ pub mod error;
 pub mod formats;
 mod iter;
 mod pixel_codecs;
+mod shared;
 
 /// Provides all the functionality needed to encode a GVR texture file.
 ///
