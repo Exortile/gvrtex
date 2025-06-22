@@ -56,7 +56,9 @@ impl TryFrom<u8> for PixelFormat {
             0 => Ok(Self::IntensityA8),
             1 => Ok(Self::RGB565),
             2 => Ok(Self::RGB5A3),
-            _ => Err(TextureDecodeError::InvalidFile),
+            _ => Err(TextureDecodeError::InvalidFile(
+                "Unknown pixel format".into(),
+            )),
         }
     }
 }
@@ -132,7 +134,9 @@ impl TryFrom<u8> for DataFormat {
             0x08 => Ok(Self::Index4),
             0x09 => Ok(Self::Index8),
             0x0E => Ok(Self::Dxt1),
-            _ => Err(TextureDecodeError::InvalidFile),
+            _ => Err(TextureDecodeError::InvalidFile(
+                "Unknown data format.".into(),
+            )),
         }
     }
 }
