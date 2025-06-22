@@ -85,7 +85,7 @@ pub enum TextureDecodeError {
     ///
     /// The latter option is the most common reason, with the other options only really being possible
     /// if the file was corrupted in some way or the encoder that encoded said file has a bug in it.
-    InvalidFile,
+    InvalidFile(String),
     /// Returned when attempting to access the decoded image before decoding has started,
     /// or after decoding has failed.
     Undecoded,
@@ -102,7 +102,7 @@ impl Error for TextureDecodeError {}
 impl fmt::Display for TextureDecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidFile => write!(f, "The given file is an invalid GVR texture file."),
+            Self::InvalidFile(msg) => write!(f, "GVR file is invalid: {msg}"),
             Self::Undecoded => write!(f, "This texture has not been decoded successfully."),
             Self::Io(err) => write!(f, "{err}"),
             Self::Image(err) => write!(f, "{err}"),

@@ -409,10 +409,14 @@ impl TextureDecoder {
 
         let flags = self.cursor.read_u8()?;
         let Some(data_flags) = DataFlags::from_bits(flags & 0xF) else {
-            return Err(TextureDecodeError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile(
+                "Data flags are invalid.".into(),
+            ));
         };
         let Ok(palette_format) = PixelFormat::try_from((flags >> 4) & 0xF) else {
-            return Err(TextureDecodeError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile(
+                "Pixel format is invalid.".into(),
+            ));
         };
 
         let data_format: DataFormat = DataFormat::try_from(self.cursor.read_u8()?)?;
@@ -425,7 +429,9 @@ impl TextureDecoder {
         if data_flags.intersects(DataFlags::InternalPalette)
             && matches!(data_format, DataFormat::Index4 | DataFormat::Index8).not()
         {
-            return Err(TextureDecodeError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile(
+                "Texture contains a palette but the data format doesn't match.".into(),
+            ));
         }
 
         let width = self.cursor.read_u16::<BigEndian>()?;
@@ -433,8 +439,10 @@ impl TextureDecoder {
 
         let mut data: Vec<u8> = Vec::with_capacity(data_len);
         let read_size = self.cursor.read_to_end(&mut data)?;
-        if read_size != data_len {
-            return Err(TextureDecodeError::InvalidFile);
+        if read_size < data_len {
+            return Err(TextureDecodeError::InvalidFile(
+                "Given texture buffer is not big enough, texture data is missing.".into(),
+            ));
         }
 
         if data_flags.intersects(DataFlags::InternalPalette) {
@@ -505,13 +513,17 @@ impl TextureDecoder {
     fn is_valid_gvr(&mut self) -> Result<(), TextureDecodeError> {
         let type_magic = self.read_string(4)?;
         if type_magic != "GCIX" && type_magic != "GBIX" {
-            return Err(TextureDecodeError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile(
+                "Magic values in the header don't match.".into(),
+            ));
         }
 
         self.cursor.seek(SeekFrom::Start(0x10))?;
         let tex_magic = self.read_string(4)?;
         if tex_magic != "GVRT" {
-            return Err(TextureDecodeError::InvalidFile);
+            return Err(TextureDecodeError::InvalidFile(
+                "Magic values in the header don't match.".into(),
+            ));
         }
         Ok(())
     }
