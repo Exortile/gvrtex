@@ -10,6 +10,10 @@ categories.workspace = true
 keywords.workspace = true
 readme = "../README.md"
 
+[lib]
+name = "gvrtex"
+crate-type = ["cdylib"]
+
 [dependencies]
 bitflags = "2.9.0"
 byteorder = "1.5.0"
@@ -17,3 +21,4 @@ image = "0.25.6"
 imagequant = "4.3.4"
 log = "0.4.27"
 gvrtex_macros = { version = "0.1.2", path = "../gvrtex_macros" }
+pyo3 = { version = "0.25.1", features = ["extension-module"] }

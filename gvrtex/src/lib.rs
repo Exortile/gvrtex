@@ -60,6 +60,8 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use codec::GvrEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageReader, RgbaImage};
+use pyo3::exceptions::PyException;
+use pyo3::{create_exception, prelude::*};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::Not;
 
@@ -68,6 +70,7 @@ pub mod error;
 pub mod formats;
 mod iter;
 mod pixel_codecs;
+mod python;
 
 /// Provides all the functionality needed to encode a GVR texture file.
 ///
@@ -537,4 +540,27 @@ impl TextureDecoder {
         }
         Ok(())
     }
+}
+
+// Python FFI
+
+#[allow(missing_docs)]
+mod py_exceptions {
+    use super::*;
+
+    create_exception!(gvrtex, PyTextureDecodeError, PyException);
+    create_exception!(gvrtex, PyTextureEncodeError, PyException);
+}
+
+pub use py_exceptions::PyTextureDecodeError;
+pub use py_exceptions::PyTextureEncodeError;
+
+#[pymodule]
+fn gvrtex(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<python::DecodedGVR>()?;
+
+    m.add_function(wrap_pyfunction!(python::decode_from_path, m)?)?;
+    m.add_function(wrap_pyfunction!(python::decode_from_buffer, m)?)?;
+
+    Ok(())
 }
