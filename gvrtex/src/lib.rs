@@ -289,6 +289,29 @@ impl TextureEncoder {
         self.encode_internal(img)
     }
 
+    /// Encodes the pixels in the `pixel_buffer` that has the given `width` and `height` into a GVR
+    /// texture. The pixels have to be in RGBA unsigned byte format.
+    ///
+    /// This method returns an in-memory representation of the file as a [`Vec`] of bytes.
+    ///
+    /// # Errors
+    ///
+    /// If anything goes wrong in the encoding process, a [`TextureEncodeError`] is returned
+    /// instead.
+    pub fn encode_pixel_buffer(
+        &mut self,
+        pixel_buffer: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>, TextureEncodeError> {
+        let img = match RgbaImage::from_vec(width, height, pixel_buffer) {
+            Some(image) => image,
+            None => return Err(TextureEncodeError::InvalidBuffer),
+        };
+
+        self.encode_internal(DynamicImage::ImageRgba8(img))
+    }
+
     fn encode_internal(&mut self, img: DynamicImage) -> Result<Vec<u8>, TextureEncodeError> {
         let mut result = Vec::new();
         let rgba_img = img.into_rgba8();
@@ -561,6 +584,7 @@ fn gvrtex(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(python::decode_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(python::decode_from_buffer, m)?)?;
+    m.add_function(wrap_pyfunction!(python::encode_pixel_buffer_gcix, m)?)?;
 
     Ok(())
 }
