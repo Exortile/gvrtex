@@ -230,9 +230,11 @@ impl TextureEncoder {
         let mut mipmaps: Vec<u8> = vec![];
         let mipmap_count = img.width().ilog2();
         let mut tex_size = img.width() / 2;
+        let (x_block_size, y_block_size) = encoder.get_block_size();
+        let smallest_mip_size = x_block_size.max(y_block_size);
 
         for _ in 0..mipmap_count {
-            if tex_size < 1 {
+            if tex_size < smallest_mip_size {
                 break;
             }
 
