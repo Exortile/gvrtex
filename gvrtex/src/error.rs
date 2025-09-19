@@ -33,6 +33,9 @@ pub enum TextureEncodeError {
     /// Easiest way to fix this is by keeping your image dimensions as powers of 2 (for example:
     /// 64x64, 128x64, 512x256, etc).
     InvalidDimensions(u32, u32, u32),
+    /// The given source image file doesn't have a square aspect ratio. This is required for if you
+    /// are trying to encode mipmaps alongside the image.
+    InvalidDimensionsMipmap(u32, u32),
 }
 
 impl Error for TextureEncodeError {}
@@ -51,6 +54,7 @@ impl fmt::Display for TextureEncodeError {
             ),
             Self::SmallDimensions(width, height, x_block, y_block) => write!(f, "The dimensions for the input image ({width}x{height}) are too small! Dimensions have to be at least {x_block}x{y_block}."),
             Self::InvalidDimensions(width, height, block_size) => write!(f, "The dimensions for the input image ({width}x{height}) are invalid! Dimensions have to be a multiple of {block_size}."),
+            Self::InvalidDimensionsMipmap(width, height) => write!(f, "The dimensions for the input image ({width}x{height}) are invalid for encoding mipmaps! Dimensions have to be using a square aspect ratio (e.g. 64x64 or 128x128)."),
         }
     }
 }

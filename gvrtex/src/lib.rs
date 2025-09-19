@@ -294,6 +294,15 @@ impl TextureEncoder {
             encoder.validate_input(&rgba_img)?;
             encoded = encoder.encode(&rgba_img, self.pixel_format)?;
         } else {
+            if self.data_flags.intersects(DataFlags::Mipmaps)
+                && rgba_img.width() != rgba_img.height()
+            {
+                return Err(TextureEncodeError::InvalidDimensionsMipmap(
+                    rgba_img.width(),
+                    rgba_img.height(),
+                ));
+            }
+
             let encoder = create_new_encoder(self.data_format);
             encoder.validate_input(&rgba_img)?;
             encoded = encoder.encode(&rgba_img);
