@@ -17,6 +17,34 @@ pub struct DecodedGVR {
     pub data: Vec<u8>,
 }
 
+#[pyfunction]
+pub fn convert_pixels_to_u8_rgba(pixels: Vec<f32>, width: u32, _height: u32) -> Vec<u8> {
+    let mut output = Vec::with_capacity(pixels.len());
+
+    let row_size = (width * 4) as usize;
+    for i in (row_size..pixels.len() + 1).step_by(row_size).rev() {
+        for p in &pixels[i - row_size..i] {
+            output.push((p * 255.0).round() as u8);
+        }
+    }
+
+    output
+}
+
+#[pyfunction]
+pub fn convert_pixels_to_f32_rgba(pixels: Vec<u8>, width: u32, _height: u32) -> Vec<f32> {
+    let mut output = Vec::with_capacity(pixels.len());
+
+    let row_size = (width * 4) as usize;
+    for i in (row_size..pixels.len() + 1).step_by(row_size).rev() {
+        for p in &pixels[i - row_size..i] {
+            output.push(*p as f32 / 255.0);
+        }
+    }
+
+    output
+}
+
 fn decode_internal(mut decoder: TextureDecoder) -> PyResult<DecodedGVR> {
     if let Err(err) = decoder.decode() {
         return Err(PyTextureDecodeError::new_err(err.to_string()));

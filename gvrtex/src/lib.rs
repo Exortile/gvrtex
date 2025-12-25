@@ -585,6 +585,8 @@ fn gvrtex(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python::decode_from_path, m)?)?;
     m.add_function(wrap_pyfunction!(python::decode_from_buffer, m)?)?;
     m.add_function(wrap_pyfunction!(python::encode_pixel_buffer_gcix, m)?)?;
+    m.add_function(wrap_pyfunction!(python::convert_pixels_to_u8_rgba, m)?)?;
+    m.add_function(wrap_pyfunction!(python::convert_pixels_to_f32_rgba, m)?)?;
 
     Ok(())
 }
