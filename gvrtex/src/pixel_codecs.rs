@@ -321,7 +321,7 @@ fn distance_bc1(color_1: &[u8], offset_1: usize, color_2: &[u8], offset_2: usize
     temp
 }
 
-#[gvr_encoder_base(1, 1)]
+#[gvr_encoder_base(8, 8)]
 pub struct DXT1Encoder;
 
 impl GvrEncoder for DXT1Encoder {
@@ -830,7 +830,7 @@ impl GvrDecoderPalette for Index4PaletteDecoder {
     }
 }
 
-#[gvr_decoder_base(1, 1)]
+#[gvr_decoder_base(8, 8)]
 pub struct DXT1Decoder;
 
 impl GvrDecoder for DXT1Decoder {
